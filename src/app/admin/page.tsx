@@ -1,43 +1,76 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { motion, AnimatePresence } from 'framer-motion';
-import { Shield, Lock, User, AlertCircle, ArrowRight, ArrowLeft } from 'lucide-react';
+import { motion } from 'framer-motion';
+import { Shield, Lock, User, AlertCircle, ArrowRight, ArrowLeft, KeyRound } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
-import { Input } from '@/components/ui/Input';
-import { Logo } from '@/app/page';
+import { auth } from '@/backend/firebase';
+import { signInWithEmailAndPassword } from 'firebase/auth';
+
+const ADMIN_PRIMARY_UID = 'k7AgEIzGQHbBxnekS26POn4602x2';
 
 export default function AdminLoginPage() {
   const router = useRouter();
-  const [username, setUsername] = useState('');
+  const [emailOrUser, setEmailOrUser] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
 
-  const handleLogin = (e: React.FormEvent) => {
+  // Check if current authenticated user already has Admin UID
+  useEffect(() => {
+    if (auth.currentUser && auth.currentUser.uid === ADMIN_PRIMARY_UID) {
+      if (typeof window !== 'undefined') {
+        sessionStorage.setItem('fb_admin_auth', 'true');
+        sessionStorage.setItem('fb_admin_uid', auth.currentUser.uid);
+      }
+      router.push('/admin/dashboard');
+    }
+  }, [router]);
+
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
     setIsLoading(true);
 
-    setTimeout(() => {
-      // Secure local check or admin email verification
-      const cleanUser = username.trim().toLowerCase();
-      if ((cleanUser === 'admin' || cleanUser === 'admin@foundback.com') && password === 'admin123') {
-        if (typeof window !== 'undefined') {
+    const identifier = emailOrUser.trim().toLowerCase();
+
+    // 1. Check if user is signing in via Firebase Email/Password
+    if (identifier.includes('@')) {
+      try {
+        const cred = await signInWithEmailAndPassword(auth, identifier, password);
+        if (cred.user.uid === ADMIN_PRIMARY_UID) {
           sessionStorage.setItem('fb_admin_auth', 'true');
+          sessionStorage.setItem('fb_admin_uid', cred.user.uid);
+          router.push('/admin/dashboard');
+          return;
+        } else {
+          setError(`Access denied. UID (${cred.user.uid.slice(0, 8)}...) is not authorized as Admin.`);
+          setIsLoading(false);
+          return;
         }
-        router.push('/admin/dashboard');
-      } else {
-        setError('Invalid admin credentials. Hint: admin / admin123');
-        setIsLoading(false);
+      } catch (err: any) {
+        console.warn('Firebase admin sign-in attempt failed, checking fallback credentials:', err?.code);
       }
-    }, 600);
+    }
+
+    // 2. Direct Admin root login verification
+    if ((identifier === 'admin' || identifier === 'admin@foundback.com') && password === 'admin123') {
+      if (typeof window !== 'undefined') {
+        sessionStorage.setItem('fb_admin_auth', 'true');
+        sessionStorage.setItem('fb_admin_uid', ADMIN_PRIMARY_UID);
+      }
+      router.push('/admin/dashboard');
+      return;
+    }
+
+    setError('Invalid Admin credentials or unauthorized UID. Please try again.');
+    setIsLoading(false);
   };
 
   return (
     <div className="min-h-screen bg-slate-950 flex flex-col justify-between py-12 px-4 sm:px-6 lg:px-8 relative overflow-hidden text-left">
-      {/* Dynamic Background glowing meshes */}
+      {/* Background glowing meshes */}
       <div className="absolute top-0 right-1/4 w-96 h-96 bg-indigo-600/20 rounded-full blur-3xl pointer-events-none" />
       <div className="absolute bottom-0 left-1/4 w-96 h-96 bg-purple-600/15 rounded-full blur-3xl pointer-events-none" />
 
@@ -60,7 +93,7 @@ export default function AdminLoginPage() {
           </div>
           <h2 className="text-3xl font-extrabold text-white tracking-tight">Admin Portal</h2>
           <p className="text-xs font-medium text-slate-400">
-            Internal Operations, Dispatch & Database Management
+            Internal Operations, Dispatch & Verification Suite
           </p>
         </div>
 
@@ -79,14 +112,14 @@ export default function AdminLoginPage() {
 
           <form onSubmit={handleLogin} className="space-y-4">
             <div className="space-y-1.5">
-              <label className="text-xs font-semibold text-slate-300">Admin Username</label>
+              <label className="text-xs font-semibold text-slate-300">Admin Email or Username</label>
               <div className="relative flex items-center">
                 <User className="absolute left-3.5 w-4 h-4 text-slate-500 pointer-events-none" />
                 <input
                   type="text"
-                  placeholder="admin"
-                  value={username}
-                  onChange={(e) => setUsername(e.target.value)}
+                  placeholder="admin or your admin email"
+                  value={emailOrUser}
+                  onChange={(e) => setEmailOrUser(e.target.value)}
                   className="w-full pl-10 pr-4 py-2.5 bg-slate-800/80 border border-slate-700 rounded-xl text-sm font-medium text-white placeholder:text-slate-500 focus:outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 transition-all"
                   required
                 />
@@ -114,15 +147,19 @@ export default function AdminLoginPage() {
               className="w-full mt-4 py-3 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold flex items-center justify-center gap-2 shadow-lg shadow-indigo-600/30"
               isLoading={isLoading}
             >
-              Sign In to Dashboard
+              Verify & Enter Console
               <ArrowRight className="w-4 h-4" />
             </Button>
           </form>
 
-          <div className="mt-6 pt-5 border-t border-slate-800 text-center">
-            <span className="text-[11px] text-slate-500 font-medium">
-              Demo Access: username <strong className="text-slate-300">admin</strong> &bull; password <strong className="text-slate-300">admin123</strong>
-            </span>
+          <div className="mt-6 pt-5 border-t border-slate-800/80 space-y-2">
+            <div className="flex items-center gap-1.5 text-[10px] text-slate-500 font-mono">
+              <KeyRound className="w-3.5 h-3.5 text-indigo-400" />
+              <span>Admin UID: <strong className="text-slate-300">k7AgEIzGQHbBxnekS26POn4602x2</strong></span>
+            </div>
+            <p className="text-[10px] text-slate-500">
+              Direct Access: username <strong className="text-slate-300">admin</strong> &bull; password <strong className="text-slate-300">admin123</strong>
+            </p>
           </div>
         </div>
       </div>
