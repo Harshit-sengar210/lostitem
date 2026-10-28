@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useId } from 'react';
 import { Eye, EyeOff } from 'lucide-react';
 
 interface InputProps extends React.InputHTMLAttributes<HTMLInputElement> {
@@ -21,7 +21,8 @@ export const Input: React.FC<InputProps> = ({
   ...props
 }) => {
   const [showPassword, setShowPassword] = useState(false);
-  const inputId = id || `input-${Math.random().toString(36).substring(2, 9)}`;
+  const reactGeneratedId = useId();
+  const inputId = id || reactGeneratedId;
 
   const isPassword = type === 'password';
   const currentType = isPassword ? (showPassword ? 'text' : 'password') : type;
@@ -51,8 +52,8 @@ export const Input: React.FC<InputProps> = ({
             ${isPassword ? 'pr-10' : ''}
             ${
               error
-                ? 'border-red-300 focus:border-red-500 focus:ring-4 focus:ring-red-100'
-                : 'border-slate-200 focus:border-brand focus:ring-4 focus:ring-indigo-100'
+                ? 'border-red-500 focus:border-red-500 focus:ring-4 focus:ring-red-50'
+                : 'border-slate-200 focus:border-brand focus:ring-4 focus:ring-brand-light'
             }
           `}
           {...props}
@@ -62,18 +63,16 @@ export const Input: React.FC<InputProps> = ({
           <button
             type="button"
             onClick={() => setShowPassword(!showPassword)}
-            className="absolute right-3 text-slate-400 hover:text-slate-600 transition-colors p-1 rounded-lg hover:bg-slate-50"
+            className="absolute right-3.5 text-slate-400 hover:text-slate-600 focus:outline-none"
+            tabIndex={-1}
           >
             {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
           </button>
         )}
       </div>
 
-      {error ? (
-        <p className="text-xs font-semibold text-red-500">{error}</p>
-      ) : helperText ? (
-        <p className="text-xs text-slate-500">{helperText}</p>
-      ) : null}
+      {error && <span className="text-xs text-red-500 font-medium">{error}</span>}
+      {helperText && !error && <span className="text-xs text-slate-400">{helperText}</span>}
     </div>
   );
 };
