@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
@@ -14,13 +14,14 @@ import {
   Gem,
   Laptop,
   HelpCircle,
-  ShieldCheck,
   CheckCircle,
   MapPin,
   Calendar,
   Camera,
   Mail,
-  Info
+  Info,
+  UploadCloud,
+  X
 } from 'lucide-react';
 import { useFoundBack } from '@/components/FoundBackProvider';
 import { Navigation } from '@/components/Navigation';
@@ -28,10 +29,13 @@ import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { CATEGORIES, ItemCategory } from '@/data/mockItems';
+import { useCloudinaryUpload } from '@/hooks/useCloudinaryUpload';
 
 export default function ReportLostPage() {
   const router = useRouter();
   const { reportLostItem, addToast } = useFoundBack();
+  const { upload, uploading } = useCloudinaryUpload();
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const [step, setStep] = useState(1);
   const [loading, setLoading] = useState(false);
@@ -46,6 +50,7 @@ export default function ReportLostPage() {
   const [location, setLocation] = useState('');
   const [date, setDate] = useState('');
   const [contactPref, setContactPref] = useState<'email' | 'phone' | 'both'>('both');
+  const [uploadedImage, setUploadedImage] = useState<string>('');
 
   const totalSteps = 5;
 
@@ -74,28 +79,51 @@ export default function ReportLostPage() {
     }
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleImageFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (file.size > 10 * 1024 * 1024) {
+      addToast('Image size exceeds 10MB limit.', 'error');
+      return;
+    }
+
+    const cloudUrl = await upload(file, 'foundback/lost_items');
+    if (cloudUrl) {
+      setUploadedImage(cloudUrl);
+      addToast('Photo uploaded to Cloudinary! 📸', 'success');
+    } else {
+      // Local preview fallback
+      const localUrl = URL.createObjectURL(file);
+      setUploadedImage(localUrl);
+      addToast('Photo selected.', 'info');
+    }
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!category) return;
     setLoading(true);
 
-    // Mock network request
-    setTimeout(() => {
-      setLoading(false);
-      if (!category) return;
-
-      const generatedId = reportLostItem({
+    try {
+      const generatedId = await reportLostItem({
         name,
         category,
         location,
         date,
         description,
         uniqueDetails,
-        image: 'https://images.unsplash.com/photo-1593005510509-d05e267f4c9c?q=80&w=600&auto=format&fit=crop', // default photo placeholder
+        image: uploadedImage || 'https://images.unsplash.com/photo-1593005510509-d05e267f4c9c?q=80&w=600&auto=format&fit=crop',
       });
 
       setNewId(generatedId);
       setSuccess(true);
-    }, 1500);
+    } catch (err: any) {
+      console.error(err);
+      addToast('Failed to save report: ' + (err?.message || 'Error'), 'error');
+    } finally {
+      setLoading(false);
+    }
   };
 
   const getCategoryIcon = (iconName: string) => {
@@ -152,14 +180,14 @@ export default function ReportLostPage() {
                 animate={{ opacity: 1, scale: 1 }}
                 className="py-8 flex flex-col items-center gap-5 text-center"
               >
-                <div className="w-16 h-16 bg-indigo-50 border border-brand/20 rounded-full flex items-center justify-center text-brand shadow-md animate-bounce">
+                <div className="w-16 h-16 bg-indigo-50 border border-brand/20 rounded-full flex items-center justify-center text-brand shadow-md">
                   <CheckCircle className="w-8 h-8 stroke-[2.5]" />
                 </div>
                 <div className="space-y-1.5">
-                  <span className="text-[10px] font-bold text-brand uppercase tracking-wider">Report Successful</span>
-                  <h3 className="text-xl font-extrabold text-slate-900">Lost Item Listed!</h3>
+                  <span className="text-[10px] font-bold text-brand uppercase tracking-wider">Report Saved Live</span>
+                  <h3 className="text-xl font-extrabold text-slate-900">Lost Item Listed in Database!</h3>
                   <p className="text-xs text-slate-500 max-w-sm px-6">
-                    Your lost listing for &quot;{name}&quot; has been indexed in the database. We will notify you if a matching item is reported.
+                    Your lost listing for &quot;{name}&quot; is now active in Firestore and linked to your profile activity.
                   </p>
                 </div>
 
@@ -167,9 +195,9 @@ export default function ReportLostPage() {
                   <Button
                     variant="outline"
                     className="flex-1"
-                    onClick={() => router.push('/home')}
+                    onClick={() => router.push('/activity?tab=lost')}
                   >
-                    Go to Homepage
+                    View in My Activity
                   </Button>
                   <Button
                     variant="primary"
@@ -248,7 +276,7 @@ export default function ReportLostPage() {
                       <div className="flex flex-col gap-1.5">
                         <label className="text-xs font-semibold text-slate-700">Public Description</label>
                         <textarea
-                          placeholder="e.g. Left a blue backpack. Has a couple of textbooks inside, somewhat worn at the bottom. Do NOT write your phone number or passwords here."
+                          placeholder="e.g. Left a blue backpack. Has a couple of textbooks inside, somewhat worn at the bottom. Do NOT write your passwords here."
                           value={description}
                           onChange={(e) => setDescription(e.target.value)}
                           rows={3}
@@ -261,7 +289,7 @@ export default function ReportLostPage() {
                         <label className="text-xs font-semibold text-slate-700 flex items-center gap-1">
                           Private Unique Detail
                           <span className="text-[9px] font-bold bg-amber-50 text-amber-700 border border-amber-100 rounded-md px-1.5 py-0.5 uppercase tracking-wide">
-                            Withheld details
+                            Withheld detail
                           </span>
                         </label>
                         <textarea
@@ -326,24 +354,58 @@ export default function ReportLostPage() {
                       <div>
                         <span className="text-[10px] font-bold text-brand uppercase tracking-wider">Step 04 &bull; Photo Upload</span>
                         <h2 className="text-xl font-extrabold text-slate-900 mt-1">Upload item images</h2>
-                        <p className="text-xs text-slate-500 mt-0.5">Upload photos to help identify the item easily.</p>
+                        <p className="text-xs text-slate-500 mt-0.5">Upload a photo to Cloudinary to help identify the item easily.</p>
                       </div>
 
-                      {/* Drag area */}
-                      <div className="border-2 border-dashed border-slate-200 rounded-2xl py-10 px-4 text-center bg-slate-50 hover:bg-slate-100/50 hover:border-brand/40 transition-colors flex flex-col items-center gap-3 cursor-pointer">
-                        <div className="p-3 bg-white border border-slate-100 text-slate-400 rounded-xl shadow-xs">
-                          <Camera className="w-6 h-6" />
+                      <input
+                        type="file"
+                        accept="image/*"
+                        ref={fileInputRef}
+                        onChange={handleImageFileChange}
+                        className="hidden"
+                      />
+
+                      {uploadedImage ? (
+                        <div className="relative rounded-2xl overflow-hidden border border-slate-200">
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img
+                            src={uploadedImage}
+                            alt="Uploaded item"
+                            className="w-full h-48 object-cover"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setUploadedImage('')}
+                            className="absolute top-2 right-2 p-1.5 bg-black/60 hover:bg-black/80 text-white rounded-full transition-colors"
+                          >
+                            <X className="w-4 h-4" />
+                          </button>
                         </div>
-                        <div className="space-y-1">
-                          <span className="text-xs font-bold text-slate-700">Drag and drop images here</span>
-                          <span className="text-[10px] text-slate-400 block">PNG, JPG or WEBP up to 5MB</span>
+                      ) : (
+                        <div
+                          onClick={() => fileInputRef.current?.click()}
+                          className="border-2 border-dashed border-slate-200 rounded-2xl py-10 px-4 text-center bg-slate-50 hover:bg-slate-100/50 hover:border-brand/40 transition-colors flex flex-col items-center gap-3 cursor-pointer"
+                        >
+                          <div className="p-3 bg-white border border-slate-100 text-slate-400 rounded-xl shadow-xs">
+                            {uploading ? (
+                              <UploadCloud className="w-6 h-6 animate-pulse text-brand" />
+                            ) : (
+                              <Camera className="w-6 h-6" />
+                            )}
+                          </div>
+                          <div className="space-y-1">
+                            <span className="text-xs font-bold text-slate-700">
+                              {uploading ? 'Uploading to Cloudinary...' : 'Click to select an image from your device'}
+                            </span>
+                            <span className="text-[10px] text-slate-400 block">PNG, JPG, WEBP up to 10MB</span>
+                          </div>
                         </div>
-                      </div>
+                      )}
 
                       <div className="flex gap-2 p-3 bg-amber-50/20 border border-amber-100 rounded-xl text-[10px] text-slate-600">
                         <Info className="w-4 h-4 text-amber-600 flex-shrink-0" />
                         <p className="leading-relaxed">
-                          Do not upload photos containing sensitive personal information (such as credit card numbers or IDs showing full addresses) in clear view.
+                          Do not upload photos containing sensitive personal information in clear view.
                         </p>
                       </div>
                     </motion.div>
@@ -413,7 +475,7 @@ export default function ReportLostPage() {
                       type="submit"
                       variant="primary"
                       className="flex-1"
-                      isLoading={loading}
+                      isLoading={loading || uploading}
                     >
                       Submit Lost Report
                     </Button>

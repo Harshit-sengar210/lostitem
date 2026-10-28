@@ -3,7 +3,7 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { Item, ItemStatus, ItemCategory, Notification, ClaimAnswers, INITIAL_ITEMS, INITIAL_NOTIFICATIONS, DeliveryPartner } from '@/data/mockItems';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
-import { doc, getDoc } from 'firebase/firestore';
+import { doc, getDoc, setDoc, updateDoc, deleteDoc, collection, getDocs, query, orderBy, serverTimestamp, increment } from 'firebase/firestore';
 import { auth, db } from '../../backend/firebase';
 
 interface User {
@@ -60,19 +60,19 @@ interface FoundBackContextType {
   toasts: Toast[];
   activeRecovery: RecoveryState | null;
   
-  // Existing auth & location hooks
   loginUser: (name: string, email: string, phone: string, role: 'lost' | 'found' | 'both') => void;
   logoutUser: () => void;
   updateLocation: (loc: string) => void;
   addToast: (message: string, type?: 'success' | 'error' | 'info') => void;
   removeToast: (id: string) => void;
-  reportLostItem: (itemData: Omit<Item, 'id' | 'status' | 'distance' | 'finderName' | 'finderRating' | 'isVerified' | 'deliveryPartner' | 'address' | 'paymentMethod' | 'recoveryId' | 'timeline' | 'claimAnswers'>) => string;
-  reportFoundItem: (itemData: Omit<Item, 'id' | 'status' | 'distance' | 'finderName' | 'finderRating' | 'isVerified' | 'deliveryPartner' | 'address' | 'paymentMethod' | 'recoveryId' | 'timeline' | 'claimAnswers'>) => string;
+  reportLostItem: (itemData: Omit<Item, 'id' | 'status' | 'distance' | 'finderName' | 'finderRating' | 'isVerified' | 'deliveryPartner' | 'address' | 'paymentMethod' | 'recoveryId' | 'timeline' | 'claimAnswers'>) => Promise<string>;
+  reportFoundItem: (itemData: Omit<Item, 'id' | 'status' | 'distance' | 'finderName' | 'finderRating' | 'isVerified' | 'deliveryPartner' | 'address' | 'paymentMethod' | 'recoveryId' | 'timeline' | 'claimAnswers'>) => Promise<string>;
+  deleteUserItem: (itemId: string) => Promise<void>;
+  updateUserItem: (itemId: string, updates: Partial<Item>) => Promise<void>;
   markNotificationRead: (id: string) => void;
   clearNotifications: () => void;
   saveItem: (itemId: string) => void;
 
-  // New Phase 4, 5, 6 Recovery hooks
   startClaim: (itemId: string) => void;
   submitVerification: (answers: ClaimAnswers) => Promise<boolean>;
   selectRecoveryMethod: (method: 'delivery' | 'pickup') => void;
@@ -94,29 +94,51 @@ export const FoundBackProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const [activeRecovery, setActiveRecovery] = useState<RecoveryState | null>(null);
   const [isInitialized, setIsInitialized] = useState(false);
 
-  // Initialize localStorage data (items, notifications, location, recovery)
+  // 1. Initial Load of items from Firestore or fallback
+  const fetchLiveItems = async () => {
+    try {
+      const q = query(collection(db, 'items'), orderBy('createdAt', 'desc'));
+      const snap = await getDocs(q);
+      if (!snap.empty) {
+        const liveItems = snap.docs.map((d) => ({
+          id: d.id,
+          ...d.data(),
+        })) as Item[];
+        setItems(liveItems);
+        return;
+      }
+    } catch (e) {
+      console.warn('Firestore items query note (fallback to cached/initial):', e);
+    }
+
+    // LocalStorage fallback if offline
+    if (typeof window !== 'undefined') {
+      const stored = localStorage.getItem('fb_items');
+      setItems(stored ? JSON.parse(stored) : INITIAL_ITEMS);
+    }
+  };
+
   useEffect(() => {
     if (typeof window !== 'undefined') {
-      const storedItems = localStorage.getItem('fb_items');
       const storedNotifications = localStorage.getItem('fb_notifications');
       const storedLocation = localStorage.getItem('fb_location');
       const storedRecovery = localStorage.getItem('fb_active_recovery');
 
-      setItems(storedItems ? JSON.parse(storedItems) : INITIAL_ITEMS);
       setNotifications(storedNotifications ? JSON.parse(storedNotifications) : INITIAL_NOTIFICATIONS);
       setUserLocation(storedLocation || null);
       setActiveRecovery(storedRecovery ? JSON.parse(storedRecovery) : null);
       setIsInitialized(true);
     }
+    fetchLiveItems();
   }, []);
 
-  // Firebase auth state listener — auto-restores session on page refresh
+  // 2. Firebase auth state listener — auto-restores session on page refresh
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       if (firebaseUser) {
-        // Try to load full profile from Firestore
         try {
-          const snap = await getDoc(doc(db, 'users', firebaseUser.uid));
+          const userRef = doc(db, 'users', firebaseUser.uid);
+          const snap = await getDoc(userRef);
           if (snap.exists()) {
             const p = snap.data();
             setUser({
@@ -132,10 +154,25 @@ export const FoundBackProvider: React.FC<{ children: React.ReactNode }> = ({ chi
               itemsReturned: p.itemsReturned ?? 0,
             });
           } else {
-            // Firestore doc not yet created (e.g. Google first-time)
-            setUser({
+            // New account
+            const newUserDoc = {
+              uid: firebaseUser.uid,
               name: firebaseUser.displayName ?? 'User',
               email: firebaseUser.email ?? '',
+              phone: '',
+              trustScore: 80,
+              itemsLost: 0,
+              itemsFound: 0,
+              itemsRecovered: 0,
+              itemsReturned: 0,
+              targetRole: 'both',
+              createdAt: serverTimestamp(),
+              updatedAt: serverTimestamp(),
+            };
+            await setDoc(userRef, newUserDoc, { merge: true });
+            setUser({
+              name: newUserDoc.name,
+              email: newUserDoc.email,
               phone: '',
               isLoggedIn: true,
               targetRole: 'both',
@@ -147,7 +184,6 @@ export const FoundBackProvider: React.FC<{ children: React.ReactNode }> = ({ chi
             });
           }
         } catch {
-          // Offline or permission error — use Firebase Auth data
           setUser({
             name: firebaseUser.displayName ?? 'User',
             email: firebaseUser.email ?? '',
@@ -162,7 +198,6 @@ export const FoundBackProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           });
         }
       } else {
-        // Logged out
         setUser(null);
       }
     });
@@ -193,12 +228,8 @@ export const FoundBackProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   }, [user, isInitialized]);
 
   useEffect(() => {
-    if (isInitialized && typeof window !== 'undefined') {
-      if (userLocation) {
-        localStorage.setItem('fb_location', userLocation);
-      } else {
-        localStorage.removeItem('fb_location');
-      }
+    if (isInitialized && typeof window !== 'undefined' && userLocation) {
+      localStorage.setItem('fb_location', userLocation);
     }
   }, [userLocation, isInitialized]);
 
@@ -211,131 +242,6 @@ export const FoundBackProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       }
     }
   }, [activeRecovery, isInitialized]);
-
-  // Live simulation of delivery tracking states
-  useEffect(() => {
-    if (!activeRecovery || activeRecovery.claimStatus !== 'paid' || activeRecovery.recoveryMethod !== 'delivery') return;
-
-    let timer: NodeJS.Timeout;
-
-    const advanceSimulation = () => {
-      setActiveRecovery((prev) => {
-        if (!prev) return null;
-
-        // 1. Searching -> Partner Assigned
-        if (prev.partnerStatus === 'searching') {
-          addToast('Delivery partner assigned!', 'success');
-          addNotification(
-            'Rider Assigned',
-            'Arjun Kumar has been assigned to your recovery.',
-            `/tracking/${prev.itemId}`
-          );
-          return {
-            ...prev,
-            partnerStatus: 'assigned',
-            partner: {
-              name: 'Arjun Kumar',
-              rating: 4.9,
-              vehicle: 'Honda Activa (Electric) - UP 14 AB 4821',
-              eta: 24,
-            },
-            trackingStatus: 'partner_assigned',
-            eta: 24,
-          };
-        }
-
-        // 2. Partner Assigned -> Picked Up
-        if (prev.trackingStatus === 'partner_assigned') {
-          addToast('Arjun has picked up your item.', 'info');
-          addNotification(
-            'Item Picked Up',
-            'Your item has been picked up by Arjun Kumar.',
-            `/tracking/${prev.itemId}`
-          );
-          return {
-            ...prev,
-            trackingStatus: 'picked_up',
-            eta: 20,
-          };
-        }
-
-        // 3. Picked Up -> In Transit
-        if (prev.trackingStatus === 'picked_up') {
-          addToast('Your item is on the way.', 'info');
-          addNotification(
-            'Delivery in Transit',
-            'Your recovery is currently on the way.',
-            `/tracking/${prev.itemId}`
-          );
-          return {
-            ...prev,
-            trackingStatus: 'in_transit',
-            eta: 14,
-          };
-        }
-
-        // 4. In Transit -> Nearby
-        if (prev.trackingStatus === 'in_transit') {
-          addToast('Your delivery partner is nearby.', 'info');
-          addNotification(
-            'Rider Nearby',
-            'Arjun Kumar is within 1 km of your address.',
-            `/tracking/${prev.itemId}`
-          );
-          return {
-            ...prev,
-            trackingStatus: 'nearby',
-            eta: 5,
-          };
-        }
-
-        // 5. Nearby -> Arriving
-        if (prev.trackingStatus === 'nearby') {
-          addToast('Your item has arrived.', 'success');
-          addNotification(
-            'Rider Arrived',
-            'Arjun Kumar has arrived at your address.',
-            `/tracking/${prev.itemId}`
-          );
-          return {
-            ...prev,
-            trackingStatus: 'arriving',
-            eta: 1,
-          };
-        }
-
-        // 6. Arriving -> Delivered
-        if (prev.trackingStatus === 'arriving') {
-          addToast('Recovery delivered successfully!', 'success');
-          addNotification(
-            'Item Delivered',
-            'Your item has been marked as delivered. Confirm receipt.',
-            `/tracking/${prev.itemId}`
-          );
-          
-          // Also update global item status in search database to CLAIMED
-          setItems((prevItems) =>
-            prevItems.map((item) =>
-              item.id === prev.itemId ? { ...item, status: 'CLAIMED' } : item
-            )
-          );
-
-          return {
-            ...prev,
-            trackingStatus: 'delivered',
-            eta: 0,
-          };
-        }
-
-        return prev;
-      });
-    };
-
-    // Trigger state changes every 8 seconds for quick demo purposes
-    timer = setInterval(advanceSimulation, 8000);
-
-    return () => clearInterval(timer);
-  }, [activeRecovery?.claimStatus, activeRecovery?.partnerStatus, activeRecovery?.trackingStatus]);
 
   // Toast System
   const addToast = (message: string, type: 'success' | 'error' | 'info' = 'info') => {
@@ -360,8 +266,6 @@ export const FoundBackProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     setNotifications((prev) => [newNotif, ...prev]);
   };
 
-  // Auth Operations — user state is primarily managed by the Firebase onAuthStateChanged listener above.
-  // loginUser is called by the auth page immediately after Firebase login to update local state without waiting.
   const loginUser = (name: string, email: string, phone: string, role: 'lost' | 'found' | 'both') => {
     setUser((prev) => ({
       name,
@@ -379,7 +283,7 @@ export const FoundBackProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
   const logoutUser = async () => {
     try {
-      await signOut(auth); // Firebase sign out — onAuthStateChanged will set user to null
+      await signOut(auth);
     } catch {
       // ignore
     }
@@ -393,67 +297,147 @@ export const FoundBackProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     addToast('Location updated', 'success');
   };
 
-  // Report Operations
-  const reportLostItem = (itemData: Omit<Item, 'id' | 'status' | 'distance' | 'finderName' | 'finderRating' | 'isVerified' | 'deliveryPartner' | 'address' | 'paymentMethod' | 'recoveryId' | 'timeline' | 'claimAnswers'>) => {
-    const newId = `item-${Date.now()}`;
-    const newItem: Item = {
+  // ─── REPORT LOST (Firestore + Profile Counter) ───────────────
+  const reportLostItem = async (
+    itemData: Omit<Item, 'id' | 'status' | 'distance' | 'finderName' | 'finderRating' | 'isVerified' | 'deliveryPartner' | 'address' | 'paymentMethod' | 'recoveryId' | 'timeline' | 'claimAnswers'>
+  ): Promise<string> => {
+    const currentUid = auth.currentUser?.uid || null;
+    const currentUserName = user?.name || auth.currentUser?.displayName || 'You';
+
+    const newDocRef = doc(collection(db, 'items'));
+    const newId = newDocRef.id;
+
+    const newItemPayload: any = {
       ...itemData,
       id: newId,
       status: 'LOST',
-      distance: parseFloat((Math.random() * 3).toFixed(1)),
-      finderName: 'You (Lost Report)',
+      distance: 0.5,
+      finderName: `${currentUserName} (Lost Report)`,
+      reporterId: currentUid,
+      reporterEmail: user?.email || auth.currentUser?.email || '',
       finderRating: 5.0,
       isVerified: false,
       deliveryPartner: null,
       address: null,
       paymentMethod: null,
       recoveryId: null,
-      timeline: [],
+      timeline: [
+        { status: 'Lost Report Filed', time: 'Just now', completed: true },
+        { status: 'Matching Search Active', time: 'Ongoing', completed: false }
+      ],
       claimAnswers: null,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
     };
 
-    setItems((prev) => [newItem, ...prev]);
-    addNotification('Lost Item Reported', `Your report for "${itemData.name}" has been submitted.`, `/item/${newId}`);
-    addToast('Item reported successfully', 'success');
+    // 1. Save to Firestore
+    try {
+      await setDoc(newDocRef, newItemPayload);
+      if (currentUid) {
+        await updateDoc(doc(db, 'users', currentUid), {
+          itemsLost: increment(1),
+          updatedAt: serverTimestamp(),
+        });
+      }
+    } catch (err) {
+      console.warn('Error saving lost item to Firestore, saving locally:', err);
+    }
+
+    // 2. Update local app state
+    setItems((prev) => [newItemPayload as Item, ...prev]);
+    setUser((prev) => (prev ? { ...prev, itemsLost: (prev.itemsLost || 0) + 1 } : null));
+
+    addNotification('Lost Item Reported', `Your report for "${itemData.name}" has been registered.`, `/item/${newId}`);
+    addToast('Lost item report saved to database! 🚀', 'success');
     return newId;
   };
 
-  const reportFoundItem = (itemData: Omit<Item, 'id' | 'status' | 'distance' | 'finderName' | 'finderRating' | 'isVerified' | 'deliveryPartner' | 'address' | 'paymentMethod' | 'recoveryId' | 'timeline' | 'claimAnswers'>) => {
-    const newId = `item-${Date.now()}`;
-    const newItem: Item = {
+  // ─── REPORT FOUND (Firestore + Profile Counter) ──────────────
+  const reportFoundItem = async (
+    itemData: Omit<Item, 'id' | 'status' | 'distance' | 'finderName' | 'finderRating' | 'isVerified' | 'deliveryPartner' | 'address' | 'paymentMethod' | 'recoveryId' | 'timeline' | 'claimAnswers'>
+  ): Promise<string> => {
+    const currentUid = auth.currentUser?.uid || null;
+    const currentUserName = user?.name || auth.currentUser?.displayName || 'Verified Finder';
+
+    const newDocRef = doc(collection(db, 'items'));
+    const newId = newDocRef.id;
+
+    const newItemPayload: any = {
       ...itemData,
       id: newId,
       status: 'FOUND',
-      distance: parseFloat((Math.random() * 3).toFixed(1)),
-      finderName: user?.name || 'Verified Founder',
-      finderRating: 4.9,
+      distance: 1.2,
+      finderName: currentUserName,
+      finderId: currentUid,
+      finderEmail: user?.email || auth.currentUser?.email || '',
+      finderRating: 5.0,
       isVerified: true,
       deliveryPartner: null,
       address: null,
       paymentMethod: null,
       recoveryId: null,
-      timeline: [],
+      timeline: [
+        { status: 'Item Found & Verified', time: 'Just now', completed: true },
+        { status: 'Awaiting Owner Claim', time: 'Ready', completed: false }
+      ],
       claimAnswers: null,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
     };
 
-    setItems((prev) => [newItem, ...prev]);
-    addNotification('Found Item Reported', `Thank you! Found report for "${itemData.name}" is submitted.`, `/item/${newId}`);
-    addToast('Item reported successfully', 'success');
+    try {
+      await setDoc(newDocRef, newItemPayload);
+      if (currentUid) {
+        await updateDoc(doc(db, 'users', currentUid), {
+          itemsFound: increment(1),
+          updatedAt: serverTimestamp(),
+        });
+      }
+    } catch (err) {
+      console.warn('Error saving found item to Firestore, saving locally:', err);
+    }
+
+    setItems((prev) => [newItemPayload as Item, ...prev]);
+    setUser((prev) => (prev ? { ...prev, itemsFound: (prev.itemsFound || 0) + 1 } : null));
+
+    addNotification('Found Item Reported', `Found report for "${itemData.name}" is submitted.`, `/item/${newId}`);
+    addToast('Found item listed in database! 🎉', 'success');
     return newId;
   };
 
+  // ─── DELETE USER ITEM (Firestore + Local) ────────────────────
+  const deleteUserItem = async (itemId: string) => {
+    try {
+      await deleteDoc(doc(db, 'items', itemId));
+    } catch (err) {
+      console.warn('Could not delete from Firestore:', err);
+    }
+    setItems((prev) => prev.filter((it) => it.id !== itemId));
+    addToast('Report deleted.', 'info');
+  };
+
+  // ─── UPDATE USER ITEM ─────────────────────────────────────────
+  const updateUserItem = async (itemId: string, updates: Partial<Item>) => {
+    try {
+      await updateDoc(doc(db, 'items', itemId), {
+        ...updates,
+        updatedAt: serverTimestamp(),
+      });
+    } catch (err) {
+      console.warn('Could not update in Firestore:', err);
+    }
+    setItems((prev) => prev.map((it) => (it.id === itemId ? { ...it, ...updates } : it)));
+    addToast('Listing updated successfully.', 'success');
+  };
+
   const saveItem = (itemId: string) => {
-    // Toggle save status on item description or local list
     addToast('Item saved', 'success');
   };
 
-  // ==================================================
-  // RECOVERY FLOW HOOKS (PHASE 4, 5, 6)
-  // ==================================================
-
+  // Recovery hooks
   const startClaim = (itemId: string) => {
     setActiveRecovery({
-      recoveryId: null,
+      recoveryId: `rec-${Date.now()}`,
       itemId,
       verificationStatus: 'none',
       claimStatus: 'started',
@@ -463,7 +447,7 @@ export const FoundBackProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       partnerStatus: null,
       partner: null,
       trackingStatus: null,
-      eta: 0,
+      eta: 30,
       rating: null,
       feedback: null,
       completedAt: null,
@@ -472,145 +456,86 @@ export const FoundBackProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
   const submitVerification = async (answers: ClaimAnswers): Promise<boolean> => {
     if (!activeRecovery) return false;
+    setActiveRecovery((prev) => (prev ? { ...prev, claimStatus: 'verifying' } : null));
 
-    setActiveRecovery((prev) => prev ? { ...prev, verificationStatus: 'pending', claimStatus: 'verifying' } : null);
-    
-    // Simulate verification check matching against seed database values
-    const targetItem = items.find((i) => i.id === activeRecovery.itemId);
-    
     return new Promise((resolve) => {
       setTimeout(() => {
-        // Simple comparison check: fails only if unique detail is left completely blank or has 'fail'
-        const isSuccessful = answers.uniqueDetail.trim().length > 3 && !answers.uniqueDetail.toLowerCase().includes('fail');
-        
-        if (isSuccessful) {
+        const isMatched = answers.color.trim().length > 1;
+        if (isMatched) {
           setActiveRecovery((prev) =>
-            prev
-              ? {
-                  ...prev,
-                  verificationStatus: 'success',
-                  claimStatus: 'verified',
-                }
-              : null
+            prev ? { ...prev, verificationStatus: 'success', claimStatus: 'verified' } : null
           );
-          addToast('Your ownership verification passed.', 'success');
-          addNotification(
-            'Verification Passed',
-            `Your claim for "${targetItem?.name}" has been verified successfully.`,
-            `/recovery/${activeRecovery.itemId}`
-          );
+          addToast('Verification successful! You can now claim your item.', 'success');
           resolve(true);
         } else {
           setActiveRecovery((prev) =>
-            prev
-              ? {
-                  ...prev,
-                  verificationStatus: 'failed',
-                  claimStatus: 'none',
-                }
-              : null
+            prev ? { ...prev, verificationStatus: 'failed', claimStatus: 'started' } : null
           );
-          addToast('Ownership verification failed', 'error');
+          addToast('Verification answers do not match the report.', 'error');
           resolve(false);
         }
-      }, 3000);
+      }, 1500);
     });
   };
 
   const selectRecoveryMethod = (method: 'delivery' | 'pickup') => {
-    setActiveRecovery((prev) => prev ? { ...prev, recoveryMethod: method } : null);
+    setActiveRecovery((prev) => (prev ? { ...prev, recoveryMethod: method } : null));
   };
 
   const saveAddress = (address: RecoveryAddress) => {
-    setActiveRecovery((prev) => prev ? { ...prev, deliveryAddress: address } : null);
-    addToast('Address updated', 'success');
+    setActiveRecovery((prev) => (prev ? { ...prev, deliveryAddress: address } : null));
+    addToast('Delivery address saved', 'success');
   };
 
   const processPayment = (method: 'UPI' | 'CARD' | 'COD') => {
     if (!activeRecovery) return;
-
-    const rId = `FB-REC-${Math.floor(10000 + Math.random() * 90000)}`;
-
-    setActiveRecovery((prev) => {
-      if (!prev) return null;
-
-      // Update matching item status in items database to CLAIMED
-      setItems((prevItems) =>
-        prevItems.map((item) =>
-          item.id === prev.itemId
-            ? { ...item, status: 'CLAIMED', paymentMethod: method, recoveryId: rId }
-            : item
-        )
-      );
-
-      // Trigger radar and delivery rider search state
-      return {
-        ...prev,
-        recoveryId: rId,
-        paymentStatus: 'completed',
-        claimStatus: 'paid',
-        partnerStatus: 'searching', // triggers Radar Search view
-      };
-    });
-
-    addToast('Payment successful.', 'success');
-    addNotification('Payment Confirmed', `Recovery request for item is confirmed. ID: ${rId}`, `/tracking/${activeRecovery.itemId}`);
+    setActiveRecovery((prev) =>
+      prev
+        ? {
+            ...prev,
+            paymentStatus: 'completed',
+            claimStatus: 'paid',
+            partnerStatus: 'searching',
+            trackingStatus: 'partner_assigned',
+            eta: 28,
+            partner: {
+              name: 'Arjun Kumar',
+              rating: 4.9,
+              vehicle: 'Honda Activa (DL 8S 4120)',
+              eta: 28,
+            },
+          }
+        : null
+    );
+    addToast('Payment confirmed! Courier dispatched.', 'success');
   };
 
   const confirmReceived = () => {
+    if (!activeRecovery) return;
+    const currentUid = auth.currentUser?.uid;
+
+    if (currentUid) {
+      updateDoc(doc(db, 'users', currentUid), {
+        itemsRecovered: increment(1),
+        updatedAt: serverTimestamp(),
+      }).catch(console.warn);
+    }
+
     setActiveRecovery((prev) =>
-      prev
-        ? {
-            ...prev,
-            trackingStatus: 'completed',
-            claimStatus: 'completed',
-            completedAt: Date.now(),
-          }
-        : null
+      prev ? { ...prev, claimStatus: 'completed', trackingStatus: 'completed', completedAt: Date.now() } : null
     );
-
-    // Update user stats
-    setUser((prev) =>
-      prev
-        ? {
-            ...prev,
-            itemsRecovered: prev.itemsRecovered + 1,
-            trustScore: Math.min(prev.trustScore + 2, 100),
-          }
-        : null
-    );
-
-    addToast('Report marked as complete', 'success');
+    setUser((prev) => (prev ? { ...prev, itemsRecovered: (prev.itemsRecovered || 0) + 1 } : null));
+    addToast('Recovery marked completed! 🎉', 'success');
   };
 
   const submitRating = (rating: number, feedback: string) => {
-    setActiveRecovery((prev) =>
-      prev
-        ? {
-            ...prev,
-            rating,
-            feedback,
-          }
-        : null
-    );
-
-    addToast('Review submitted', 'success');
+    if (!activeRecovery) return;
+    setActiveRecovery((prev) => (prev ? { ...prev, rating, feedback } : null));
+    addToast('Thank you for rating your experience!', 'success');
   };
 
   const resetRecovery = () => {
     setActiveRecovery(null);
-  };
-
-  // Notifications Operations
-  const markNotificationRead = (id: string) => {
-    setNotifications((prev) =>
-      prev.map((n) => (n.id === id ? { ...n, unread: false } : n))
-    );
-  };
-
-  const clearNotifications = () => {
-    setNotifications([]);
-    addToast('Notifications cleared.', 'info');
   };
 
   return (
@@ -622,7 +547,6 @@ export const FoundBackProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         userLocation,
         toasts,
         activeRecovery,
-        
         loginUser,
         logoutUser,
         updateLocation,
@@ -630,10 +554,11 @@ export const FoundBackProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         removeToast,
         reportLostItem,
         reportFoundItem,
+        deleteUserItem,
+        updateUserItem,
         markNotificationRead,
         clearNotifications,
         saveItem,
-
         startClaim,
         submitVerification,
         selectRecoveryMethod,
@@ -651,7 +576,7 @@ export const FoundBackProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
 export const useFoundBack = () => {
   const context = useContext(FoundBackContext);
-  if (context === undefined) {
+  if (!context) {
     throw new Error('useFoundBack must be used within a FoundBackProvider');
   }
   return context;

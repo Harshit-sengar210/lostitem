@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
@@ -14,12 +14,13 @@ import {
   Gem,
   Laptop,
   HelpCircle,
-  ShieldCheck,
   CheckCircle,
   MapPin,
   Calendar,
   Camera,
-  Heart
+  Heart,
+  UploadCloud,
+  X
 } from 'lucide-react';
 import { useFoundBack } from '@/components/FoundBackProvider';
 import { Navigation } from '@/components/Navigation';
@@ -27,10 +28,13 @@ import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { CATEGORIES, ItemCategory } from '@/data/mockItems';
+import { useCloudinaryUpload } from '@/hooks/useCloudinaryUpload';
 
 export default function ReportFoundPage() {
   const router = useRouter();
   const { reportFoundItem, addToast } = useFoundBack();
+  const { upload, uploading } = useCloudinaryUpload();
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const [step, setStep] = useState(1);
   const [loading, setLoading] = useState(false);
@@ -45,6 +49,7 @@ export default function ReportFoundPage() {
   const [location, setLocation] = useState('');
   const [date, setDate] = useState('');
   const [condition, setCondition] = useState('good');
+  const [uploadedImage, setUploadedImage] = useState<string>('');
 
   const totalSteps = 5;
 
@@ -54,7 +59,7 @@ export default function ReportFoundPage() {
       return;
     }
     if (step === 2 && (!name || !description || !uniqueDetails)) {
-      addToast('Please fill in all details.', 'error');
+      addToast('Please fill in all description fields.', 'error');
       return;
     }
     if (step === 3 && (!location || !date)) {
@@ -73,28 +78,50 @@ export default function ReportFoundPage() {
     }
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleImageFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (file.size > 10 * 1024 * 1024) {
+      addToast('Image size exceeds 10MB limit.', 'error');
+      return;
+    }
+
+    const cloudUrl = await upload(file, 'foundback/found_items');
+    if (cloudUrl) {
+      setUploadedImage(cloudUrl);
+      addToast('Photo uploaded to Cloudinary! 📸', 'success');
+    } else {
+      const localUrl = URL.createObjectURL(file);
+      setUploadedImage(localUrl);
+      addToast('Photo selected.', 'info');
+    }
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!category) return;
     setLoading(true);
 
-    // Mock network request
-    setTimeout(() => {
-      setLoading(false);
-      if (!category) return;
-
-      const generatedId = reportFoundItem({
+    try {
+      const generatedId = await reportFoundItem({
         name,
         category,
         location,
         date,
         description,
         uniqueDetails,
-        image: 'https://images.unsplash.com/photo-1588449668338-d134af2c3e4f?q=80&w=600&auto=format&fit=crop', // AirPods placeholder or general
+        image: uploadedImage || 'https://images.unsplash.com/photo-1593005510509-d05e267f4c9c?q=80&w=600&auto=format&fit=crop',
       });
 
       setNewId(generatedId);
       setSuccess(true);
-    }, 1500);
+    } catch (err: any) {
+      console.error(err);
+      addToast('Failed to save found report: ' + (err?.message || 'Error'), 'error');
+    } finally {
+      setLoading(false);
+    }
   };
 
   const getCategoryIcon = (iconName: string) => {
@@ -129,13 +156,13 @@ export default function ReportFoundPage() {
           {success ? 'Close Wizard' : step > 1 ? 'Previous Step' : 'Cancel'}
         </button>
 
-        {/* Wizard Steps indicator */}
+        {/* Wizard Steps indicator bar */}
         {!success && (
           <div className="flex gap-1.5 border-b border-slate-200/50 pb-5">
             {Array.from({ length: totalSteps }).map((_, idx) => (
               <div key={idx} className="flex-1 h-1 rounded-full bg-slate-200 relative overflow-hidden">
-                {idx + 1 < step && <div className="absolute inset-0 bg-emerald-500" />}
-                {idx + 1 === step && <div className="absolute inset-0 bg-emerald-500 animate-pulse" />}
+                {idx + 1 < step && <div className="absolute inset-0 bg-brand" />}
+                {idx + 1 === step && <div className="absolute inset-0 bg-brand animate-pulse" />}
               </div>
             ))}
           </div>
@@ -151,14 +178,14 @@ export default function ReportFoundPage() {
                 animate={{ opacity: 1, scale: 1 }}
                 className="py-8 flex flex-col items-center gap-5 text-center"
               >
-                <div className="w-16 h-16 bg-emerald-50 border border-emerald-200 rounded-full flex items-center justify-center text-emerald-600 shadow-md animate-bounce">
-                  <Heart className="w-8 h-8 stroke-[2.5] fill-current" />
+                <div className="w-16 h-16 bg-emerald-50 border border-emerald-500/20 rounded-full flex items-center justify-center text-emerald-600 shadow-md">
+                  <CheckCircle className="w-8 h-8 stroke-[2.5]" />
                 </div>
                 <div className="space-y-1.5">
-                  <span className="text-[10px] font-bold text-emerald-600 uppercase tracking-wider">Report Successful</span>
-                  <h3 className="text-xl font-extrabold text-slate-900">Thank you for helping!</h3>
+                  <span className="text-[10px] font-bold text-emerald-600 uppercase tracking-wider">Thank You For Helping!</span>
+                  <h3 className="text-xl font-extrabold text-slate-900">Found Item Listed in Database</h3>
                   <p className="text-xs text-slate-500 max-w-sm px-6">
-                    Your found report has been published. The status is set to <span className="font-bold text-emerald-600">Verification Pending</span>. We will alert you when matches are claimed.
+                    Your found report for &quot;{name}&quot; is active in Firestore. When the verified owner claims it, you will be notified!
                   </p>
                 </div>
 
@@ -166,16 +193,16 @@ export default function ReportFoundPage() {
                   <Button
                     variant="outline"
                     className="flex-1"
-                    onClick={() => router.push('/home')}
+                    onClick={() => router.push('/activity?tab=found')}
                   >
-                    Go to Homepage
+                    View in My Activity
                   </Button>
                   <Button
                     variant="primary"
                     className="flex-1"
                     onClick={() => router.push(`/item/${newId}`)}
                   >
-                    View Item details
+                    View Listing
                   </Button>
                 </div>
               </motion.div>
@@ -183,7 +210,7 @@ export default function ReportFoundPage() {
               <form onSubmit={handleSubmit}>
                 <AnimatePresence mode="wait">
                   
-                  {/* Step 1: Category */}
+                  {/* Step 1: Category selection */}
                   {step === 1 && (
                     <motion.div
                       key="step-1"
@@ -193,9 +220,9 @@ export default function ReportFoundPage() {
                       className="space-y-5"
                     >
                       <div>
-                        <span className="text-[10px] font-bold text-emerald-600 uppercase tracking-wider">Step 01 &bull; Category Selection</span>
-                        <h2 className="text-xl font-extrabold text-slate-900 mt-1">What did you find?</h2>
-                        <p className="text-xs text-slate-500 mt-0.5">Select a category below to list the found item.</p>
+                        <span className="text-[10px] font-bold text-brand uppercase tracking-wider">Step 01 &bull; Category Selection</span>
+                        <h2 className="text-xl font-extrabold text-slate-900 mt-1">What item did you find?</h2>
+                        <p className="text-xs text-slate-500 mt-0.5">Select a category below to list found property.</p>
                       </div>
 
                       <div className="grid grid-cols-2 gap-3.5 pt-2">
@@ -206,11 +233,11 @@ export default function ReportFoundPage() {
                             onClick={() => setCategory(cat.value)}
                             className={`p-4 border rounded-2xl flex flex-col items-center gap-3 transition-all text-xs font-extrabold select-none ${
                               category === cat.value
-                                ? 'border-emerald-500 bg-emerald-50/10 text-emerald-700 ring-2 ring-emerald-100'
+                                ? 'border-brand bg-indigo-50/20 text-brand ring-2 ring-indigo-100'
                                 : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50 text-slate-700'
                             }`}
                           >
-                            <div className={`p-2 rounded-xl ${category === cat.value ? 'bg-emerald-50 text-emerald-600' : 'bg-slate-50 text-slate-400'}`}>
+                            <div className={`p-2 rounded-xl ${category === cat.value ? 'bg-indigo-50 text-brand' : 'bg-slate-50 text-slate-400'}`}>
                               {getCategoryIcon(cat.icon)}
                             </div>
                             <span>{cat.label}</span>
@@ -230,14 +257,14 @@ export default function ReportFoundPage() {
                       className="space-y-4"
                     >
                       <div>
-                        <span className="text-[10px] font-bold text-emerald-600 uppercase tracking-wider">Step 02 &bull; Item Details</span>
-                        <h2 className="text-xl font-extrabold text-slate-900 mt-1">Describe the item found</h2>
-                        <p className="text-xs text-slate-500 mt-0.5">Provide titles and condition specifications.</p>
+                        <span className="text-[10px] font-bold text-brand uppercase tracking-wider">Step 02 &bull; Item Details</span>
+                        <h2 className="text-xl font-extrabold text-slate-900 mt-1">Item Title & Characteristics</h2>
+                        <p className="text-xs text-slate-500 mt-0.5">Help the real owner identify it.</p>
                       </div>
 
                       <Input
-                        label="What did you find?"
-                        placeholder="e.g. Apple AirPods Pro Case"
+                        label="Item Name / Title"
+                        placeholder="e.g. Black Leather Wallet with cards"
                         value={name}
                         onChange={(e) => setName(e.target.value)}
                         required
@@ -245,23 +272,9 @@ export default function ReportFoundPage() {
                       />
 
                       <div className="flex flex-col gap-1.5">
-                        <label className="text-xs font-semibold text-slate-700">Item Condition</label>
-                        <select
-                          value={condition}
-                          onChange={(e) => setCondition(e.target.value)}
-                          className="w-full px-3.5 py-2.5 bg-white border border-slate-200 rounded-xl text-xs font-semibold focus:border-brand focus:ring-4 focus:ring-indigo-50 outline-none"
-                        >
-                          <option value="mint">Mint (Like New)</option>
-                          <option value="good">Good (Minor Scratches)</option>
-                          <option value="fair">Fair (Visible Scuffs)</option>
-                          <option value="poor">Damaged / Non-functional</option>
-                        </select>
-                      </div>
-
-                      <div className="flex flex-col gap-1.5">
                         <label className="text-xs font-semibold text-slate-700">Public Description</label>
                         <textarea
-                          placeholder="e.g. Found AirPods Pro case inside Shipra Mall food court. Case has a small scratch on the front cover. Charges perfectly."
+                          placeholder="e.g. Found on a bench. Good condition, leather material. Do not reveal private ID numbers or security codes."
                           value={description}
                           onChange={(e) => setDescription(e.target.value)}
                           rows={3}
@@ -272,22 +285,19 @@ export default function ReportFoundPage() {
 
                       <div className="flex flex-col gap-1.5">
                         <label className="text-xs font-semibold text-slate-700 flex items-center gap-1">
-                          Private Unique Detail
-                          <span className="text-[9px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-100 rounded-md px-1.5 py-0.5 uppercase tracking-wide">
-                            Withheld details
+                          Private Verification Detail
+                          <span className="text-[9px] font-bold bg-amber-50 text-amber-700 border border-amber-100 rounded-md px-1.5 py-0.5 uppercase tracking-wide">
+                            Verification key
                           </span>
                         </label>
                         <textarea
-                          placeholder="e.g. A small red lightning bolt sticker is on the back near the hinge. This details is NOT shown publicly."
+                          placeholder="e.g. Card ending with 4821 inside, specific brand name or engraving..."
                           value={uniqueDetails}
                           onChange={(e) => setUniqueDetails(e.target.value)}
                           rows={2}
                           className="w-full px-3.5 py-2.5 bg-white border border-slate-200 rounded-xl text-xs font-medium focus:border-brand focus:ring-4 focus:ring-indigo-50 outline-none placeholder:text-slate-400"
                           required
                         />
-                        <p className="text-[10px] text-slate-400 leading-normal">
-                          Do not reveal unique details publicly. This detail helps verify the true owner.
-                        </p>
                       </div>
                     </motion.div>
                   )}
@@ -302,14 +312,13 @@ export default function ReportFoundPage() {
                       className="space-y-4"
                     >
                       <div>
-                        <span className="text-[10px] font-bold text-emerald-600 uppercase tracking-wider">Step 03 &bull; Location & Date</span>
+                        <span className="text-[10px] font-bold text-brand uppercase tracking-wider">Step 03 &bull; Location & Date</span>
                         <h2 className="text-xl font-extrabold text-slate-900 mt-1">Where & when did you find it?</h2>
-                        <p className="text-xs text-slate-500 mt-0.5">Specify estimated coordinates and dates.</p>
                       </div>
 
                       <Input
-                        label="Approximate Location Found"
-                        placeholder="e.g. Food Court floor near burger stand, Shipra Mall"
+                        label="Found Location"
+                        placeholder="e.g. Shipra Mall, Food Court, Indirapuram"
                         value={location}
                         onChange={(e) => setLocation(e.target.value)}
                         required
@@ -318,7 +327,7 @@ export default function ReportFoundPage() {
 
                       <Input
                         label="Date & Time Found"
-                        placeholder="e.g. Today, 2:35 PM"
+                        placeholder="e.g. Today, 2:30 PM"
                         value={date}
                         onChange={(e) => setDate(e.target.value)}
                         required
@@ -327,7 +336,7 @@ export default function ReportFoundPage() {
                     </motion.div>
                   )}
 
-                  {/* Step 4: Photo upload */}
+                  {/* Step 4: Photos upload */}
                   {step === 4 && (
                     <motion.div
                       key="step-4"
@@ -337,24 +346,59 @@ export default function ReportFoundPage() {
                       className="space-y-4"
                     >
                       <div>
-                        <span className="text-[10px] font-bold text-emerald-600 uppercase tracking-wider">Step 04 &bull; Image Upload</span>
-                        <h2 className="text-xl font-extrabold text-slate-900 mt-1">Upload item images</h2>
-                        <p className="text-xs text-slate-500 mt-0.5">Provide photographic evidence if possible.</p>
+                        <span className="text-[10px] font-bold text-brand uppercase tracking-wider">Step 04 &bull; Photo Upload</span>
+                        <h2 className="text-xl font-extrabold text-slate-900 mt-1">Upload item photo</h2>
+                        <p className="text-xs text-slate-500 mt-0.5">Upload a photo to Cloudinary so the owner can recognise it.</p>
                       </div>
 
-                      <div className="border-2 border-dashed border-slate-200 rounded-2xl py-10 px-4 text-center bg-slate-50 hover:bg-slate-100/50 hover:border-emerald-500/40 transition-colors flex flex-col items-center gap-3 cursor-pointer">
-                        <div className="p-3 bg-white border border-slate-100 text-slate-400 rounded-xl shadow-xs">
-                          <Camera className="w-6 h-6" />
+                      <input
+                        type="file"
+                        accept="image/*"
+                        ref={fileInputRef}
+                        onChange={handleImageFileChange}
+                        className="hidden"
+                      />
+
+                      {uploadedImage ? (
+                        <div className="relative rounded-2xl overflow-hidden border border-slate-200">
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img
+                            src={uploadedImage}
+                            alt="Uploaded item"
+                            className="w-full h-48 object-cover"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setUploadedImage('')}
+                            className="absolute top-2 right-2 p-1.5 bg-black/60 hover:bg-black/80 text-white rounded-full transition-colors"
+                          >
+                            <X className="w-4 h-4" />
+                          </button>
                         </div>
-                        <div className="space-y-1">
-                          <span className="text-xs font-bold text-slate-700">Drag and drop images here</span>
-                          <span className="text-[10px] text-slate-400 block">PNG, JPG or WEBP up to 5MB</span>
+                      ) : (
+                        <div
+                          onClick={() => fileInputRef.current?.click()}
+                          className="border-2 border-dashed border-slate-200 rounded-2xl py-10 px-4 text-center bg-slate-50 hover:bg-slate-100/50 hover:border-brand/40 transition-colors flex flex-col items-center gap-3 cursor-pointer"
+                        >
+                          <div className="p-3 bg-white border border-slate-100 text-slate-400 rounded-xl shadow-xs">
+                            {uploading ? (
+                              <UploadCloud className="w-6 h-6 animate-pulse text-brand" />
+                            ) : (
+                              <Camera className="w-6 h-6" />
+                            )}
+                          </div>
+                          <div className="space-y-1">
+                            <span className="text-xs font-bold text-slate-700">
+                              {uploading ? 'Uploading to Cloudinary...' : 'Click to select a photo from your device'}
+                            </span>
+                            <span className="text-[10px] text-slate-400 block">PNG, JPG, WEBP up to 10MB</span>
+                          </div>
                         </div>
-                      </div>
+                      )}
                     </motion.div>
                   )}
 
-                  {/* Step 5: Terms */}
+                  {/* Step 5: Condition */}
                   {step === 5 && (
                     <motion.div
                       key="step-5"
@@ -364,24 +408,29 @@ export default function ReportFoundPage() {
                       className="space-y-4"
                     >
                       <div>
-                        <span className="text-[10px] font-bold text-emerald-600 uppercase tracking-wider">Step 05 &bull; Terms Validation</span>
-                        <h2 className="text-xl font-extrabold text-slate-900 mt-1">Safety Handover Terms</h2>
-                        <p className="text-xs text-slate-500 mt-0.5">Please review safety guidelines before submitting.</p>
+                        <span className="text-[10px] font-bold text-brand uppercase tracking-wider">Step 05 &bull; Item Condition</span>
+                        <h2 className="text-xl font-extrabold text-slate-900 mt-1">What condition is it in?</h2>
                       </div>
 
-                      <div className="space-y-3.5 text-xs text-slate-600">
-                        <div className="flex gap-3 p-3 bg-slate-50 rounded-xl border border-slate-100">
-                          <input type="checkbox" defaultChecked className="rounded border-slate-300 text-brand w-4 h-4 mt-0.5" />
-                          <p className="leading-relaxed">
-                            I agree to coordinate handovers only in well-lit, public settings for physical safety.
-                          </p>
-                        </div>
-                        <div className="flex gap-3 p-3 bg-slate-50 rounded-xl border border-slate-100">
-                          <input type="checkbox" defaultChecked className="rounded border-slate-300 text-brand w-4 h-4 mt-0.5" />
-                          <p className="leading-relaxed">
-                            I confirm that the descriptions provided are genuine and I physically found this item.
-                          </p>
-                        </div>
+                      <div className="grid grid-cols-3 gap-3">
+                        {[
+                          { id: 'mint', label: 'Like New' },
+                          { id: 'good', label: 'Good' },
+                          { id: 'damaged', label: 'Damaged' },
+                        ].map((c) => (
+                          <button
+                            key={c.id}
+                            type="button"
+                            onClick={() => setCondition(c.id)}
+                            className={`p-4 border rounded-xl flex flex-col items-center gap-2 text-xs font-bold select-none transition-all ${
+                              condition === c.id
+                                ? 'border-brand bg-indigo-50/20 text-brand ring-2 ring-indigo-100'
+                                : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50'
+                            }`}
+                          >
+                            <span>{c.label}</span>
+                          </button>
+                        ))}
                       </div>
                     </motion.div>
                   )}
@@ -415,7 +464,7 @@ export default function ReportFoundPage() {
                       type="submit"
                       variant="primary"
                       className="flex-1"
-                      isLoading={loading}
+                      isLoading={loading || uploading}
                     >
                       Submit Found Report
                     </Button>
