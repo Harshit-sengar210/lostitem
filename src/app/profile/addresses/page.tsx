@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ArrowLeft, Plus, MapPin, Trash2, Edit3, X, Home, Briefcase, Bookmark } from 'lucide-react';
+import { ArrowLeft, Plus, MapPin, Trash2, X, Home, Briefcase, Bookmark, PlusCircle } from 'lucide-react';
 import { useFoundBack } from '@/components/FoundBackProvider';
 import { Navigation } from '@/components/Navigation';
 import { Card } from '@/components/ui/Card';
@@ -40,61 +40,35 @@ export default function SavedAddressesPage() {
   const [state, setState] = useState('');
   const [pincode, setPincode] = useState('');
 
-  // Initial load
+  // Initial load from user storage (no hardcoded dummy addresses)
   useEffect(() => {
     if (typeof window !== 'undefined') {
       const stored = localStorage.getItem('fb_saved_addresses_list');
       if (stored) {
-        setAddresses(JSON.parse(stored));
+        try {
+          setAddresses(JSON.parse(stored));
+        } catch {
+          setAddresses([]);
+        }
       } else {
-        const initial = [
-          {
-            id: 'addr-1',
-            label: 'Home',
-            fullName: 'Arpit Goyal',
-            phone: '9876543210',
-            address: 'Tower 3, Flat 104, Shipra Sun City, Indirapuram',
-            apartment: 'Shipra Mall Road',
-            city: 'Ghaziabad',
-            state: 'Uttar Pradesh',
-            pincode: '201014'
-          },
-          {
-            id: 'addr-2',
-            label: 'Work',
-            fullName: 'Arpit Goyal',
-            phone: '9876543210',
-            address: 'Block C-20, Stellar IT Park, Sector 62',
-            apartment: 'Noida Office Hub',
-            city: 'Noida',
-            state: 'Uttar Pradesh',
-            pincode: '201301'
-          }
-        ];
-        setAddresses(initial);
-        localStorage.setItem('fb_saved_addresses_list', JSON.stringify(initial));
+        setAddresses([]);
       }
     }
-    const timer = setTimeout(() => setLoading(false), 300);
+    const timer = setTimeout(() => setLoading(false), 200);
     return () => clearTimeout(timer);
   }, []);
 
-  const saveToLocalStorage = (list: SavedAddress[]) => {
-    setAddresses(list);
-    localStorage.setItem('fb_saved_addresses_list', JSON.stringify(list));
-  };
-
-  const handleDelete = (id: string) => {
-    const updated = addresses.filter((addr) => addr.id !== id);
-    saveToLocalStorage(updated);
-    addToast('Address deleted', 'info');
+  const saveToStorage = (updated: SavedAddress[]) => {
+    setAddresses(updated);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('fb_saved_addresses_list', JSON.stringify(updated));
+    }
   };
 
   const handleAddAddress = (e: React.FormEvent) => {
     e.preventDefault();
-
-    if (!fullName.trim() || !address.trim() || !city.trim() || !state.trim() || !pincode.trim()) {
-      addToast('Please fill out all required fields.', 'error');
+    if (!fullName || !phone || !address || !city || !pincode) {
+      addToast('Please fill all required fields.', 'error');
       return;
     }
 
@@ -107,13 +81,14 @@ export default function SavedAddressesPage() {
       apartment,
       city,
       state,
-      pincode
+      pincode,
     };
 
-    const updated = [...addresses, newAddr];
-    saveToLocalStorage(updated);
-    
-    // Clear forms
+    saveToStorage([newAddr, ...addresses]);
+    addToast('Address added successfully.', 'success');
+    setShowModal(false);
+
+    // Reset form
     setFullName('');
     setPhone('');
     setAddress('');
@@ -121,17 +96,12 @@ export default function SavedAddressesPage() {
     setCity('');
     setState('');
     setPincode('');
-    setShowModal(false);
-    
-    addToast('Address added successfully', 'success');
   };
 
-  const getLabelIcon = (labelStr: string) => {
-    switch (labelStr.toLowerCase()) {
-      case 'home': return <Home className="w-4 h-4 text-brand" />;
-      case 'work': return <Briefcase className="w-4 h-4 text-brand" />;
-      default: return <Bookmark className="w-4 h-4 text-brand" />;
-    }
+  const handleDelete = (id: string) => {
+    const updated = addresses.filter((a) => a.id !== id);
+    saveToStorage(updated);
+    addToast('Address deleted.', 'info');
   };
 
   if (loading) {
@@ -140,7 +110,7 @@ export default function SavedAddressesPage() {
         <Navigation />
         <div className="max-w-xl mx-auto px-6 py-12 animate-pulse space-y-6">
           <div className="h-6 w-24 bg-slate-200 rounded" />
-          <div className="h-80 bg-white border border-slate-100 rounded-3xl" />
+          <div className="h-48 bg-white border border-slate-100 rounded-3xl" />
         </div>
       </div>
     );
@@ -153,209 +123,176 @@ export default function SavedAddressesPage() {
       <main className="max-w-xl mx-auto px-4 sm:px-6 py-6 sm:py-10 flex flex-col gap-6 text-left">
         
         {/* Back navigation */}
-        <div className="flex justify-between items-center">
-          <button
-            onClick={() => router.push('/profile')}
-            className="inline-flex items-center gap-1 text-xs font-bold text-slate-400 hover:text-slate-700 transition-colors"
-          >
-            <ArrowLeft className="w-4 h-4" />
-            Back to Profile
-          </button>
-          
+        <button
+          onClick={() => router.push('/profile')}
+          className="self-start inline-flex items-center gap-1 text-xs font-bold text-slate-400 hover:text-slate-700 transition-colors"
+        >
+          <ArrowLeft className="w-4 h-4" />
+          Back to Profile
+        </button>
+
+        {/* Header & Add Button */}
+        <div className="flex items-center justify-between">
+          <div>
+            <h2 className="text-xl font-extrabold text-slate-900">Saved Addresses</h2>
+            <p className="text-xs text-slate-500">Addresses for item courier delivery and pick-up.</p>
+          </div>
           <Button
-            variant="outline"
             size="sm"
+            variant="primary"
             onClick={() => setShowModal(true)}
-            className="py-2 px-3 rounded-xl text-xs font-bold flex items-center gap-1 border-brand text-brand hover:bg-indigo-50/30"
+            className="flex items-center gap-1.5"
           >
-            <Plus className="w-3.5 h-3.5" />
-            Add Address
+            <Plus className="w-4 h-4" />
+            Add New
           </Button>
         </div>
 
-        {/* Header Title */}
-        <div>
-          <h1 className="text-2xl font-extrabold text-slate-900">Saved Addresses</h1>
-          <p className="text-xs text-slate-400 mt-0.5">Manage delivery destinations for item claims recovery courier partners.</p>
-        </div>
-
-        {/* Addresses listing */}
-        <div className="space-y-4">
-          {addresses.length === 0 ? (
-            <div className="py-16 text-center border border-slate-200 border-dashed rounded-3xl bg-white/40 flex flex-col items-center gap-3">
-              <MapPin className="w-8 h-8 text-slate-400" />
-              <p className="text-xs text-slate-500">No saved addresses found. Add one to speed up checkouts.</p>
-              <Button variant="primary" onClick={() => setShowModal(true)}>Add New Address</Button>
+        {/* Address Cards List */}
+        {addresses.length === 0 ? (
+          <Card hoverLift={false} className="p-8 text-center border-slate-100 bg-white">
+            <div className="w-12 h-12 rounded-2xl bg-indigo-50 text-brand flex items-center justify-center mx-auto mb-3">
+              <MapPin className="w-6 h-6" />
             </div>
-          ) : (
-            addresses.map((addr) => (
-              <Card
-                key={addr.id}
-                hoverLift={false}
-                className="border border-slate-100 bg-white p-5 flex items-start justify-between gap-4 shadow-sm"
-              >
-                <div className="flex gap-3.5 text-left min-w-0 pr-6">
-                  <div className="p-2 bg-indigo-50/50 rounded-xl text-brand flex-shrink-0 self-start">
-                    {getLabelIcon(addr.label)}
+            <h3 className="text-sm font-bold text-slate-800">No saved addresses yet</h3>
+            <p className="text-xs text-slate-400 mt-1 max-w-xs mx-auto">
+              Add your home or office address to make recovery claims and dispatch easier.
+            </p>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setShowModal(true)}
+              className="mt-4"
+            >
+              Add First Address
+            </Button>
+          </Card>
+        ) : (
+          <div className="space-y-3">
+            {addresses.map((item) => (
+              <Card key={item.id} hoverLift={false} className="p-5 border-slate-100 bg-white flex justify-between items-start">
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] font-bold uppercase tracking-wider bg-indigo-50 text-brand px-2 py-0.5 rounded-full">
+                      {item.label}
+                    </span>
+                    <span className="text-xs font-bold text-slate-900">{item.fullName}</span>
                   </div>
-                  <div className="min-w-0 space-y-1">
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs font-extrabold text-slate-900">{addr.label}</span>
-                      <span className="text-[10px] text-slate-450">&bull; {addr.fullName} ({addr.phone})</span>
-                    </div>
-                    <p className="text-[11px] text-slate-500 leading-relaxed font-semibold">
-                      {addr.address}, {addr.apartment && `${addr.apartment}, `}{addr.city}, {addr.state} - {addr.pincode}
-                    </p>
-                  </div>
+                  <p className="text-xs text-slate-600 mt-1">
+                    {item.apartment ? `${item.apartment}, ` : ''}{item.address}
+                  </p>
+                  <p className="text-xs text-slate-500">
+                    {item.city}, {item.state} - {item.pincode}
+                  </p>
+                  <p className="text-[11px] text-slate-400 font-medium">📞 {item.phone}</p>
                 </div>
-
-                <div className="flex gap-2 flex-shrink-0 self-center">
-                  <button
-                    type="button"
-                    onClick={() => handleDelete(addr.id)}
-                    className="p-2 hover:bg-red-50 text-slate-450 hover:text-red-500 rounded-xl transition-all"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
-                </div>
+                <button
+                  onClick={() => handleDelete(item.id)}
+                  className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
+                  title="Delete address"
+                >
+                  <Trash2 className="w-4 h-4" />
+                </button>
               </Card>
-            ))
-          )}
-        </div>
+            ))}
+          </div>
+        )}
 
       </main>
 
-      {/* ==================================================
-          MODAL DRAWER: ADD NEW ADDRESS
-          ================================================== */}
+      {/* Add Address Modal */}
       <AnimatePresence>
         {showModal && (
-          <>
-            {/* Backdrop */}
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-xs">
             <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setShowModal(false)}
-              className="fixed inset-0 bg-black/55 z-55 flex items-center justify-center p-4 backdrop-blur-xs"
-            />
-            {/* Form sheet */}
-            <motion.div
-              initial={{ scale: 0.95, opacity: 0, y: 15 }}
-              animate={{ scale: 1, opacity: 1, y: 0 }}
-              exit={{ scale: 0.95, opacity: 0, y: 15 }}
-              className="fixed inset-x-4 top-[8%] sm:top-[12%] mx-auto max-w-md bg-white rounded-3xl p-6 sm:p-8 z-55 border border-slate-100 shadow-2xl flex flex-col gap-5 text-left max-h-[85vh] overflow-y-auto"
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="bg-white rounded-3xl p-6 w-full max-w-md shadow-2xl border border-slate-100 text-left"
             >
-              <div className="flex justify-between items-center">
+              <div className="flex items-center justify-between mb-4">
                 <h3 className="text-base font-extrabold text-slate-900">Add New Address</h3>
                 <button
                   onClick={() => setShowModal(false)}
-                  className="p-1.5 hover:bg-slate-55 rounded-lg text-slate-400 hover:text-slate-650"
+                  className="p-1 rounded-full text-slate-400 hover:bg-slate-100"
                 >
-                  <X className="w-4.5 h-4.5" />
+                  <X className="w-5 h-5" />
                 </button>
               </div>
 
-              <form onSubmit={handleAddAddress} className="space-y-4">
-                {/* Label selector */}
-                <div className="flex flex-col gap-1.5">
-                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Address Label</label>
-                  <div className="flex gap-2">
-                    {['Home', 'Work', 'Other'].map((lbl) => (
-                      <button
-                        key={lbl}
-                        type="button"
-                        onClick={() => setLabel(lbl)}
-                        className={`px-4 py-2 rounded-xl text-xs font-bold transition-all border ${
-                          label === lbl ? 'border-brand bg-indigo-50/20 text-brand font-extrabold ring-1 ring-indigo-50' : 'border-slate-200 text-slate-600 hover:bg-slate-50'
-                        }`}
-                      >
-                        {lbl}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 gap-4">
-                  <Input
-                    label="Full Name"
-                    placeholder="e.g. Arpit Goyal"
-                    value={fullName}
-                    onChange={(e) => setFullName(e.target.value)}
-                    required
-                  />
-                  <Input
-                    label="Phone"
-                    placeholder="10-digit number"
-                    maxLength={10}
-                    value={phone}
-                    onChange={(e) => setPhone(e.target.value)}
-                    required
-                  />
+              <form onSubmit={handleAddAddress} className="space-y-3.5">
+                <div className="flex gap-2 mb-2">
+                  {(['Home', 'Work', 'Other'] as const).map((tag) => (
+                    <button
+                      type="button"
+                      key={tag}
+                      onClick={() => setLabel(tag)}
+                      className={`px-3 py-1 text-xs font-bold rounded-lg border transition-all ${
+                        label === tag
+                          ? 'bg-brand text-white border-brand'
+                          : 'bg-slate-50 text-slate-600 border-slate-200'
+                      }`}
+                    >
+                      {tag}
+                    </button>
+                  ))}
                 </div>
 
                 <Input
-                  label="Street Address"
-                  placeholder="Apartment, Society, Block..."
+                  label="Full Name"
+                  placeholder="Receiver's name"
+                  value={fullName}
+                  onChange={(e) => setFullName(e.target.value)}
+                  required
+                />
+                <Input
+                  label="Phone Number"
+                  placeholder="e.g. +91 9876543210"
+                  value={phone}
+                  onChange={(e) => setPhone(e.target.value)}
+                  required
+                />
+                <Input
+                  label="Street Address / House No."
+                  placeholder="Flat, building, street"
                   value={address}
                   onChange={(e) => setAddress(e.target.value)}
                   required
                 />
-
-                <div className="grid grid-cols-2 gap-4">
+                <Input
+                  label="Apartment / Landmark"
+                  placeholder="Near metro, floor, etc. (optional)"
+                  value={apartment}
+                  onChange={(e) => setApartment(e.target.value)}
+                />
+                <div className="grid grid-cols-2 gap-2">
                   <Input
-                    label="Landmark"
-                    placeholder="e.g. Near Metro Station"
-                    value={apartment}
-                    onChange={(e) => setApartment(e.target.value)}
+                    label="City"
+                    placeholder="e.g. Noida"
+                    value={city}
+                    onChange={(e) => setCity(e.target.value)}
+                    required
                   />
                   <Input
                     label="Pincode"
-                    placeholder="6-digit PIN"
-                    maxLength={6}
+                    placeholder="e.g. 201301"
                     value={pincode}
                     onChange={(e) => setPincode(e.target.value)}
                     required
                   />
                 </div>
 
-                <div className="grid grid-cols-2 gap-4">
-                  <Input
-                    label="City"
-                    placeholder="Ghaziabad"
-                    value={city}
-                    onChange={(e) => setCity(e.target.value)}
-                    required
-                  />
-                  <Input
-                    label="State"
-                    placeholder="Uttar Pradesh"
-                    value={state}
-                    onChange={(e) => setState(e.target.value)}
-                    required
-                  />
-                </div>
-
-                <div className="pt-2 flex gap-3">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    className="flex-1 py-3"
-                    onClick={() => setShowModal(false)}
-                  >
+                <div className="flex gap-2 pt-2">
+                  <Button type="button" variant="outline" className="flex-1" onClick={() => setShowModal(false)}>
                     Cancel
                   </Button>
-                  <Button
-                    type="submit"
-                    variant="primary"
-                    className="flex-1 py-3"
-                  >
+                  <Button type="submit" variant="primary" className="flex-1">
                     Save Address
                   </Button>
                 </div>
               </form>
             </motion.div>
-          </>
+          </div>
         )}
       </AnimatePresence>
     </div>

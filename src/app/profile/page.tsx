@@ -13,7 +13,6 @@ import {
   LogOut,
   ChevronRight,
   ShieldCheck,
-  Star,
   Award
 } from 'lucide-react';
 import { useFoundBack } from '@/components/FoundBackProvider';
@@ -28,7 +27,10 @@ const StatsCounter: React.FC<{ value: number }> = ({ value }) => {
   useEffect(() => {
     let start = 0;
     const end = value;
-    if (end === 0) return;
+    if (end === 0) {
+      setCount(0);
+      return;
+    }
     const duration = 600; // ms
     const increment = Math.ceil(end / 10) || 1;
     const timer = setInterval(() => {
@@ -53,7 +55,7 @@ export default function ProfilePage() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const timer = setTimeout(() => setLoading(false), 400);
+    const timer = setTimeout(() => setLoading(false), 300);
     return () => clearTimeout(timer);
   }, []);
 
@@ -74,7 +76,14 @@ export default function ProfilePage() {
     router.push('/');
   };
 
-  const trustScore = user?.trustScore || 96;
+  const displayName = user?.name && user.name.trim() !== '' ? user.name : 'User';
+  const trustScore = typeof user?.trustScore === 'number' ? user.trustScore : 80;
+  const initialLetters = displayName
+    .split(' ')
+    .filter(Boolean)
+    .map((n) => n[0])
+    .join('')
+    .toUpperCase() || 'U';
 
   const settingsGroups = [
     {
@@ -109,17 +118,17 @@ export default function ProfilePage() {
         {/* Profile Card Header */}
         <Card hoverLift={false} className="border border-slate-100 bg-white p-6 sm:p-8 flex flex-col sm:flex-row items-center justify-between gap-6 shadow-sm">
           <div className="flex items-center gap-4.5 text-left self-start sm:self-center">
-            <div className="w-16 h-16 bg-indigo-650 text-white rounded-3xl flex items-center justify-center font-black text-xl shadow-md shadow-indigo-100">
-              {user ? user.name.split(' ').map(n=>n[0]).join('') : 'H'}
+            <div className="w-16 h-16 bg-brand text-white rounded-3xl flex items-center justify-center font-black text-xl shadow-md shadow-indigo-100">
+              {initialLetters}
             </div>
             <div className="space-y-1">
               <div className="flex items-center gap-1.5">
-                <h2 className="text-lg font-extrabold text-slate-900 leading-tight">{user?.name || 'Harshit'}</h2>
+                <h2 className="text-lg font-extrabold text-slate-900 leading-tight">{displayName}</h2>
                 <ShieldCheck className="w-4.5 h-4.5 text-emerald-500 fill-current text-white" />
               </div>
-              <span className="text-xs text-slate-400 font-bold block">Community Member &bull; Since Aug 2026</span>
+              <span className="text-xs text-slate-400 font-bold block">{user?.email || 'Authenticated Member'}</span>
               <span className="text-[10px] text-emerald-600 bg-emerald-50 border border-emerald-100 px-2.5 py-0.5 rounded-full font-bold block mt-1.5 max-w-fit uppercase">
-                Trusted Member
+                Active Member
               </span>
             </div>
           </div>
@@ -146,35 +155,37 @@ export default function ProfilePage() {
             </div>
             <div className="text-left leading-tight">
               <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wide block">Trust Score</span>
-              <span className="text-xs font-extrabold text-slate-800">Excellent Integrity</span>
+              <span className="text-xs font-extrabold text-slate-800">
+                {trustScore >= 80 ? 'Verified Integrity' : 'Standard Member'}
+              </span>
             </div>
           </div>
         </Card>
 
-        {/* Profile Statistics counts */}
+        {/* Profile Statistics counts - REAL LIVE COUNTS */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
           <div className="bg-white border border-slate-100/80 p-4 rounded-2xl text-center shadow-xs">
             <span className="text-[10px] font-bold text-slate-400 uppercase block">Lost Reports</span>
             <span className="text-xl font-extrabold text-slate-900 block mt-1 leading-none">
-              <StatsCounter value={user?.itemsLost || 12} />
+              <StatsCounter value={user?.itemsLost ?? 0} />
             </span>
           </div>
           <div className="bg-white border border-slate-100/80 p-4 rounded-2xl text-center shadow-xs">
             <span className="text-[10px] font-bold text-slate-400 uppercase block">Found Reports</span>
             <span className="text-xl font-extrabold text-slate-900 block mt-1 leading-none">
-              <StatsCounter value={user?.itemsFound || 8} />
+              <StatsCounter value={user?.itemsFound ?? 0} />
             </span>
           </div>
           <div className="bg-white border border-slate-100/80 p-4 rounded-2xl text-center shadow-xs">
             <span className="text-[10px] font-bold text-slate-400 uppercase block">Recoveries Done</span>
             <span className="text-xl font-extrabold text-slate-900 block mt-1 leading-none">
-              <StatsCounter value={user?.itemsRecovered || 6} />
+              <StatsCounter value={user?.itemsRecovered ?? 0} />
             </span>
           </div>
           <div className="bg-white border border-slate-100/80 p-4 rounded-2xl text-center shadow-xs">
             <span className="text-[10px] font-bold text-slate-400 uppercase block">Items Returned</span>
             <span className="text-xl font-extrabold text-slate-900 block mt-1 leading-none">
-              <StatsCounter value={user?.itemsReturned || 5} />
+              <StatsCounter value={user?.itemsReturned ?? 0} />
             </span>
           </div>
         </div>
@@ -182,11 +193,11 @@ export default function ProfilePage() {
         {/* Community Trust meter explanation */}
         <Card hoverLift={false} className="border-slate-100 bg-white p-5 shadow-xs text-left">
           <div className="flex items-start gap-3">
-            <Award className="w-5 h-5 text-indigo-650 flex-shrink-0 mt-0.5" />
+            <Award className="w-5 h-5 text-brand flex-shrink-0 mt-0.5" />
             <div className="space-y-2 flex-grow">
               <h4 className="text-xs font-bold text-slate-900 uppercase tracking-wider">Community Trust Score</h4>
               <p className="text-[11px] text-slate-500 leading-normal">
-                Your trust score reflects successful reports, verified recoveries, confirmed deliveries, and positive ratings. Maintain high response levels to keep matching items secure.
+                Your trust score reflects successful reports, verified recoveries, confirmed deliveries, and positive community ratings.
               </p>
               {/* Progress bar */}
               <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden mt-1">
@@ -194,7 +205,7 @@ export default function ProfilePage() {
                   initial={{ width: 0 }}
                   animate={{ width: `${trustScore}%` }}
                   transition={{ duration: 0.8 }}
-                  className="bg-indigo-600 h-full"
+                  className="bg-brand h-full"
                 />
               </div>
             </div>

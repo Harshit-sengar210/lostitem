@@ -2,13 +2,15 @@
 
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { motion } from 'framer-motion';
-import { ArrowLeft, User, Mail, Phone, Lock, Save } from 'lucide-react';
+import { ArrowLeft, User, Mail, Phone, Save } from 'lucide-react';
 import { useFoundBack } from '@/components/FoundBackProvider';
 import { Navigation } from '@/components/Navigation';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
+import { updateProfile } from 'firebase/auth';
+import { doc, setDoc } from 'firebase/firestore';
+import { auth, db } from '../../../../backend/firebase';
 
 export default function PersonalInfoPage() {
   const router = useRouter();
@@ -23,11 +25,11 @@ export default function PersonalInfoPage() {
 
   useEffect(() => {
     if (user) {
-      setName(user.name);
-      setEmail(user.email);
-      setPhone(user.phone);
+      setName(user.name || '');
+      setEmail(user.email || '');
+      setPhone(user.phone || '');
     }
-    const timer = setTimeout(() => setLoading(false), 300);
+    const timer = setTimeout(() => setLoading(false), 200);
     return () => clearTimeout(timer);
   }, [user]);
 
@@ -47,14 +49,37 @@ export default function PersonalInfoPage() {
     e.preventDefault();
     setIsSaving(true);
 
-    // Simulate saving (1 second)
-    setTimeout(() => {
-      // Re-login / update user context with new values
-      loginUser(name, email, phone, user?.targetRole || 'both');
-      setIsSaving(false);
-      addToast('Profile updated successfully.', 'success');
+    try {
+      const currentUser = auth.currentUser;
+      if (currentUser) {
+        // Update Firebase Auth Display Name
+        if (name.trim()) {
+          await updateProfile(currentUser, { displayName: name.trim() });
+        }
+
+        // Update Firestore Document
+        const userRef = doc(db, 'users', currentUser.uid);
+        await setDoc(
+          userRef,
+          {
+            name: name.trim(),
+            phone: phone.trim(),
+            updatedAt: new Date(),
+          },
+          { merge: true }
+        );
+      }
+
+      // Update Local App State
+      loginUser(name.trim(), email.trim(), phone.trim(), user?.targetRole || 'both');
+      addToast('Profile updated live in Firestore! 🎉', 'success');
       router.push('/profile');
-    }, 1000);
+    } catch (err: any) {
+      console.error(err);
+      addToast(err?.message || 'Could not update profile.', 'error');
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   return (
@@ -83,51 +108,39 @@ export default function PersonalInfoPage() {
           <form onSubmit={handleSave} className="space-y-4">
             <Input
               label="Full Name"
-              placeholder="e.g. Harshit"
+              placeholder="e.g. Harshit Sengar"
               value={name}
               onChange={(e) => setName(e.target.value)}
               required
+              leftIcon={<User className="w-4 h-4" />}
             />
 
             <Input
               label="Email Address"
               type="email"
-              placeholder="e.g. harshit@foundback.com"
               value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              required
+              disabled
+              leftIcon={<Mail className="w-4 h-4 text-slate-400" />}
             />
 
             <Input
               label="Phone Number"
-              placeholder="e.g. +91 98765 43210"
+              placeholder="e.g. +91 9876543210"
               value={phone}
               onChange={(e) => setPhone(e.target.value)}
-              required
+              leftIcon={<Phone className="w-4 h-4" />}
             />
 
-            <div className="pt-4 flex gap-4.5 border-t border-slate-50 mt-6">
-              <Button
-                type="button"
-                variant="outline"
-                className="flex-1"
-                onClick={() => router.push('/profile')}
-              >
-                Cancel
-              </Button>
-              <Button
-                type="submit"
-                variant="primary"
-                className="flex-1"
-                isLoading={isSaving}
-              >
-                <Save className="w-4 h-4 mr-1.5" />
-                Save Changes
-              </Button>
-            </div>
+            <Button
+              type="submit"
+              variant="primary"
+              className="w-full mt-2"
+              isLoading={isSaving}
+            >
+              Save Changes
+            </Button>
           </form>
         </Card>
-
       </main>
     </div>
   );
