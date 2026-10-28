@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { Input } from '@/components/ui/Input';
 import { useFoundBack } from '@/components/FoundBackProvider';
-import { Search, MapPin, ShieldCheck, Mail, Lock, Phone, User, Globe, AlertCircle } from 'lucide-react';
+import { Search, MapPin, ShieldCheck, Mail, Lock, Phone, User, Globe, AlertCircle, CheckCircle } from 'lucide-react';
 
 // Firebase Auth
 import {
@@ -17,6 +17,7 @@ import {
   updateProfile,
   GoogleAuthProvider,
   signInWithPopup,
+  sendPasswordResetEmail,
 } from 'firebase/auth';
 import { doc, setDoc, getDoc, serverTimestamp } from 'firebase/firestore';
 import { auth, db } from '../../../backend/firebase';
@@ -29,23 +30,27 @@ async function ensureUserDoc(
   phone: string,
   role: 'lost' | 'found' | 'both'
 ) {
-  const ref = doc(db, 'users', uid);
-  const snap = await getDoc(ref);
-  if (!snap.exists()) {
-    await setDoc(ref, {
-      uid,
-      name,
-      email,
-      phone,
-      trustScore: 80,
-      targetRole: role,
-      itemsLost: 0,
-      itemsFound: 0,
-      itemsRecovered: 0,
-      itemsReturned: 0,
-      createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
-    });
+  try {
+    const ref = doc(db, 'users', uid);
+    const snap = await getDoc(ref);
+    if (!snap.exists()) {
+      await setDoc(ref, {
+        uid,
+        name,
+        email,
+        phone,
+        trustScore: 80,
+        targetRole: role,
+        itemsLost: 0,
+        itemsFound: 0,
+        itemsRecovered: 0,
+        itemsReturned: 0,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+    }
+  } catch (err) {
+    console.warn('Firestore user profile sync error (check Firestore rules/permissions):', err);
   }
 }
 
@@ -53,7 +58,7 @@ async function ensureUserDoc(
 function AuthContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { loginUser, addToast } = useFoundBack();
+  const { user, loginUser, addToast } = useFoundBack();
 
   const [activeTab, setActiveTab] = useState<'signin' | 'signup'>('signin');
   const [step, setStep] = useState<'form' | 'onboarding'>('form');
@@ -66,6 +71,7 @@ function AuthContent() {
 
   const [errors, setErrors] = useState<{ [key: string]: string }>({});
   const [firebaseError, setFirebaseError] = useState('');
+  const [resetSuccessMessage, setResetSuccessMessage] = useState('');
   const [isLoading, setIsLoading] = useState(false);
 
   const [selectedRole, setSelectedRole] = useState<'lost' | 'found' | 'both' | null>(null);
@@ -77,6 +83,13 @@ function AuthContent() {
     setActiveTab(tabParam === 'signup' ? 'signup' : 'signin');
   }, [searchParams]);
 
+  // If already logged in, redirect user to home
+  useEffect(() => {
+    if (user?.isLoggedIn && step !== 'onboarding') {
+      router.push('/home');
+    }
+  }, [user, step, router]);
+
   // ─── Validation ─────────────────────────────────────────────
   const validateForm = () => {
     const newErrors: { [key: string]: string } = {};
@@ -85,7 +98,7 @@ function AuthContent() {
       if (!phone.trim()) {
         newErrors.phone = 'Phone number is required';
       } else if (!/^\+?[0-9\s-]{10,14}$/.test(phone.trim())) {
-        newErrors.phone = 'Please enter a valid phone number';
+        newErrors.phone = 'Please enter a valid phone number (e.g. +91 9876543210)';
       }
       if (password !== confirmPassword) {
         newErrors.confirmPassword = 'Passwords do not match';
@@ -93,7 +106,7 @@ function AuthContent() {
     }
     if (!email.trim()) {
       newErrors.email = 'Email address is required';
-    } else if (!/\S+@\S+\.\S+/.test(email)) {
+    } else if (!/\S+@\S+\.\S+/.test(email.trim())) {
       newErrors.email = 'Please enter a valid email address';
     }
     if (!password) {
@@ -117,11 +130,37 @@ function AuthContent() {
       case 'auth/too-many-requests':
         return 'Too many attempts. Please wait a moment and try again.';
       case 'auth/network-request-failed':
-        return 'Network error. Please check your connection.';
+        return 'Network error. Please check your internet connection.';
       case 'auth/popup-closed-by-user':
-        return 'Google sign-in was cancelled.';
+        return 'Google sign-in was closed before completion.';
+      case 'auth/operation-not-allowed':
+        return 'Sign-in method is not enabled in Firebase Console. Please enable Email/Password or Google provider.';
+      case 'auth/invalid-email':
+        return 'Invalid email format. Please check and try again.';
+      case 'auth/weak-password':
+        return 'Password is too weak. Please use at least 6 characters.';
       default:
-        return 'Something went wrong. Please try again.';
+        return 'Authentication failed. Please check your details or try again.';
+    }
+  };
+
+  // ─── Forgot Password ─────────────────────────────────────────
+  const handleForgotPassword = async () => {
+    if (!email.trim()) {
+      setFirebaseError('Please enter your email address above first to reset password.');
+      return;
+    }
+    setFirebaseError('');
+    setResetSuccessMessage('');
+    setIsLoading(true);
+    try {
+      await sendPasswordResetEmail(auth, email.trim());
+      setResetSuccessMessage('Password reset link has been sent to your email.');
+      addToast('Password reset link sent to your email.', 'info');
+    } catch (err: any) {
+      setFirebaseError(friendlyError(err.code));
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -132,28 +171,40 @@ function AuthContent() {
 
     setIsLoading(true);
     setFirebaseError('');
+    setResetSuccessMessage('');
 
     try {
       if (activeTab === 'signin') {
         // ── Sign in ──────────────────────────────────────────
         const { user } = await signInWithEmailAndPassword(auth, email.trim(), password);
 
-        // Pull profile from Firestore (may already exist from previous signup)
-        const snap = await getDoc(doc(db, 'users', user.uid));
-        const profile = snap.exists() ? snap.data() : null;
+        // Pull profile from Firestore if available
+        let profile = null;
+        try {
+          const snap = await getDoc(doc(db, 'users', user.uid));
+          if (snap.exists()) {
+            profile = snap.data();
+          }
+        } catch {
+          // non-blocking
+        }
 
         loginUser(
           profile?.name ?? user.displayName ?? 'User',
-          user.email ?? email,
+          user.email ?? email.trim(),
           profile?.phone ?? '',
           profile?.targetRole ?? 'both'
         );
         addToast('Welcome back! 👋', 'success');
-        router.push('/location');
+        router.push('/home');
       } else {
         // ── Sign up — step 1: create Firebase account ────────
         const { user } = await createUserWithEmailAndPassword(auth, email.trim(), password);
-        await updateProfile(user, { displayName: name.trim() });
+        try {
+          await updateProfile(user, { displayName: name.trim() });
+        } catch {
+          // ignore
+        }
         setPendingUid(user.uid);
         setStep('onboarding'); // go to role selection
       }
@@ -187,7 +238,9 @@ function AuthContent() {
       addToast('Account created! Welcome to FoundBack 🎉', 'success');
       router.push('/location');
     } catch (err: any) {
-      setFirebaseError('Failed to save your profile. Please try again.');
+      setFirebaseError('Account created, continuing setup...');
+      loginUser(name.trim(), email.trim(), phone.trim(), selectedRole);
+      router.push('/location');
     } finally {
       setIsLoading(false);
     }
@@ -197,11 +250,13 @@ function AuthContent() {
   const triggerGoogleLogin = async () => {
     setIsLoading(true);
     setFirebaseError('');
+    setResetSuccessMessage('');
     try {
       const provider = new GoogleAuthProvider();
+      provider.setCustomParameters({ prompt: 'select_account' });
       const { user } = await signInWithPopup(auth, provider);
 
-      // Ensure Firestore document exists (first time Google users)
+      // Ensure Firestore document exists
       await ensureUserDoc(
         user.uid,
         user.displayName ?? 'User',
@@ -210,8 +265,15 @@ function AuthContent() {
         'both'
       );
 
-      const snap = await getDoc(doc(db, 'users', user.uid));
-      const profile = snap.exists() ? snap.data() : null;
+      let profile = null;
+      try {
+        const snap = await getDoc(doc(db, 'users', user.uid));
+        if (snap.exists()) {
+          profile = snap.data();
+        }
+      } catch {
+        // non-blocking
+      }
 
       loginUser(
         profile?.name ?? user.displayName ?? 'User',
@@ -220,7 +282,7 @@ function AuthContent() {
         profile?.targetRole ?? 'both'
       );
       addToast('Signed in with Google! 🎉', 'success');
-      router.push('/location');
+      router.push('/home');
     } catch (err: any) {
       setFirebaseError(friendlyError(err.code));
     } finally {
@@ -237,7 +299,7 @@ function AuthContent() {
 
       {/* Brand Header */}
       <div className="sm:mx-auto sm:w-full sm:max-w-md flex flex-col items-center gap-2 mb-6">
-        <Logo className="text-brand" size={44} />
+        <Logo className="text-brand cursor-pointer" size={44} />
         <h2 className="text-center text-3xl font-extrabold text-slate-900 tracking-tight">FoundBack</h2>
         <p className="text-center text-sm font-medium text-slate-500">Your lost item deserves a way home.</p>
       </div>
@@ -259,7 +321,7 @@ function AuthContent() {
                   {(['signin', 'signup'] as const).map((tab) => (
                     <button
                       key={tab}
-                      onClick={() => { setActiveTab(tab); setErrors({}); setFirebaseError(''); }}
+                      onClick={() => { setActiveTab(tab); setErrors({}); setFirebaseError(''); setResetSuccessMessage(''); }}
                       className={`flex-1 text-center py-2 text-xs font-bold rounded-lg transition-all ${
                         activeTab === tab
                           ? 'bg-white text-slate-900 shadow-sm'
@@ -283,12 +345,24 @@ function AuthContent() {
                   </motion.div>
                 )}
 
+                {/* Reset Success banner */}
+                {resetSuccessMessage && (
+                  <motion.div
+                    initial={{ opacity: 0, y: -6 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="flex items-start gap-2 bg-emerald-50 border border-emerald-200 rounded-xl px-4 py-3 mb-4"
+                  >
+                    <CheckCircle className="w-4 h-4 text-emerald-500 mt-0.5 flex-shrink-0" />
+                    <p className="text-xs text-emerald-600 font-medium">{resetSuccessMessage}</p>
+                  </motion.div>
+                )}
+
                 <form onSubmit={handleSubmit} className="space-y-4">
                   {activeTab === 'signup' && (
                     <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} className="space-y-4">
                       <Input
                         label="Full Name"
-                        placeholder="e.g. Arpit Goyal"
+                        placeholder="e.g. Harshit Sengar"
                         value={name}
                         onChange={(e) => setName(e.target.value)}
                         error={errors.name}
@@ -296,7 +370,7 @@ function AuthContent() {
                       />
                       <Input
                         label="Phone Number"
-                        placeholder="e.g. +91 98765 43210"
+                        placeholder="e.g. +91 9876543210"
                         value={phone}
                         onChange={(e) => setPhone(e.target.value)}
                         error={errors.phone}
@@ -337,8 +411,14 @@ function AuthContent() {
                   )}
 
                   {activeTab === 'signin' && (
-                    <div className="flex items-center justify-end text-xs font-semibold text-brand hover:underline cursor-pointer select-none">
-                      Forgot password?
+                    <div className="flex items-center justify-end">
+                      <button
+                        type="button"
+                        onClick={handleForgotPassword}
+                        className="text-xs font-semibold text-brand hover:underline cursor-pointer select-none"
+                      >
+                        Forgot password?
+                      </button>
                     </div>
                   )}
 
