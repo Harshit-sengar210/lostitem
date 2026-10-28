@@ -24,6 +24,7 @@ import { Button } from '@/components/ui/Button';
 import { doc, getDoc } from 'firebase/firestore';
 import { db } from '@/backend/firebase';
 import { Item } from '@/data/mockItems';
+import { ItemImage } from '@/components/ui/ItemImage';
 
 export default function ItemDetailsPage() {
   const router = useRouter();
@@ -175,10 +176,10 @@ export default function ItemDetailsPage() {
           {/* LEFT: Image Gallery */}
           <div className="lg:col-span-7 flex flex-col gap-4">
             <div className="relative aspect-4/3 w-full rounded-3xl overflow-hidden bg-slate-900 shadow-md group">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
+              <ItemImage
                 src={galleryImages[selectedImgIdx] || item.image}
                 alt={item.name}
+                category={item.category}
                 className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-102"
               />
 

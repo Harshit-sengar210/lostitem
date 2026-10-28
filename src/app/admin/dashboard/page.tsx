@@ -34,6 +34,7 @@ import { Item, ItemStatus } from '@/data/mockItems';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
+import { ItemImage } from '@/components/ui/ItemImage';
 
 interface FirestoreUser {
   id: string;
@@ -358,8 +359,12 @@ export default function AdminDashboardPage() {
                     {items.slice(0, 5).map((it) => (
                       <div key={it.id} className="py-3.5 flex items-center justify-between gap-4">
                         <div className="flex items-center gap-3 min-w-0">
-                          {/* eslint-disable-next-line @next/next/no-img-element */}
-                          <img src={it.image} alt={it.name} className="w-10 h-10 rounded-xl object-cover bg-slate-800 flex-shrink-0" />
+                          <ItemImage
+                            src={it.image}
+                            alt={it.name}
+                            category={it.category}
+                            containerClassName="w-10 h-10 rounded-xl overflow-hidden bg-slate-800 flex-shrink-0"
+                          />
                           <div className="truncate">
                             <h4 className="text-xs font-bold text-white truncate">{it.name}</h4>
                             <span className="text-[11px] text-slate-400 flex items-center gap-1">
@@ -491,8 +496,12 @@ export default function AdminDashboardPage() {
                         filteredItems.map((item) => (
                           <tr key={item.id} className="hover:bg-slate-800/30 transition-colors">
                             <td className="py-3 px-4 flex items-center gap-3">
-                              {/* eslint-disable-next-line @next/next/no-img-element */}
-                              <img src={item.image} alt={item.name} className="w-10 h-10 rounded-xl object-cover bg-slate-800 flex-shrink-0" />
+                              <ItemImage
+                                src={item.image}
+                                alt={item.name}
+                                category={item.category}
+                                containerClassName="w-10 h-10 rounded-xl overflow-hidden bg-slate-800 flex-shrink-0"
+                              />
                               <div className="min-w-0">
                                 <h4 className="font-bold text-white truncate max-w-[180px]">{item.name}</h4>
                                 <span className="text-[10px] text-slate-500 font-mono block">ID: {item.id.slice(0, 8)}...</span>

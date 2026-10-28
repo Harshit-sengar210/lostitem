@@ -28,6 +28,7 @@ import { MapIllustration } from '@/components/MapIllustration';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { CATEGORIES, ItemCategory, ItemStatus } from '@/data/mockItems';
+import { ItemImage } from '@/components/ui/ItemImage';
 
 export default function HomePage() {
   const router = useRouter();
@@ -371,13 +372,13 @@ export default function HomePage() {
                       
                       {/* Image header */}
                       <div className="relative w-full h-44 overflow-hidden bg-slate-50">
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img
+                        <ItemImage
                           src={item.image}
                           alt={item.name}
+                          category={item.category}
                           className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
                         />
-                        <div className="absolute top-3 left-3">
+                        <div className="absolute top-3 left-3 z-10">
                           {getStatusBadge(item.status)}
                         </div>
                         {item.isVerified && (

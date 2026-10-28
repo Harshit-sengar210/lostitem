@@ -21,6 +21,7 @@ import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Item } from '@/data/mockItems';
+import { ItemImage } from '@/components/ui/ItemImage';
 import { auth } from '@/backend/firebase';
 
 const AnimatedNumber: React.FC<{ value: number }> = ({ value }) => {
@@ -312,12 +313,11 @@ function ActivityContent() {
                 className="flex flex-col sm:flex-row items-center border border-slate-100 bg-white shadow-xs overflow-hidden"
               >
                 {/* Photo preview */}
-                <div className="w-full sm:w-36 h-28 flex-shrink-0 bg-slate-50 relative">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
+                <div className="w-full sm:w-36 h-28 flex-shrink-0 bg-slate-50 relative overflow-hidden">
+                  <ItemImage
                     src={item.image}
                     alt={item.name}
-                    className="w-full h-full object-cover"
+                    category={item.category}
                   />
                 </div>
 

@@ -25,6 +25,7 @@ import { Navigation } from '@/components/Navigation';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { CATEGORIES, ItemCategory, ItemStatus } from '@/data/mockItems';
+import { ItemImage } from '@/components/ui/ItemImage';
 
 function ExploreContent() {
   const router = useRouter();
@@ -349,13 +350,13 @@ function ExploreContent() {
                       className="flex flex-col justify-between hover:shadow-lg transition-all border border-slate-100/80 bg-white"
                     >
                       <div className="relative w-full h-40 overflow-hidden bg-slate-50">
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img
+                        <ItemImage
                           src={item.image}
                           alt={item.name}
+                          category={item.category}
                           className="w-full h-full object-cover hover:scale-105 transition-transform duration-500"
                         />
-                        <div className="absolute top-3 left-3">
+                        <div className="absolute top-3 left-3 z-10">
                           {item.status === 'LOST' ? (
                             <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-indigo-50 text-brand border border-indigo-100 uppercase">Lost</span>
                           ) : (
