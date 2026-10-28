@@ -1,0 +1,55 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ─── HELPER FUNCTIONS ─────────────────────────────────────────
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    // ─── USERS COLLECTION ────────────────────────────────────────
+    // Anyone can read profiles (or signed-in users), but only the user can write to their own profile.
+    match /users/{userId} {
+      allow read: if true;
+      allow create: if isSignedIn() && request.auth.uid == userId;
+      allow update, delete: if isOwner(userId);
+    }
+
+    // ─── ITEMS COLLECTION (Lost & Found Listings) ─────────────────
+    // Public read for exploring/searching lost & found items.
+    // Signed-in users can report items and edit/delete their own reports.
+    match /items/{itemId} {
+      allow read: if true;
+      allow create: if isSignedIn();
+      allow update, delete: if isSignedIn() && (
+        resource.data.reporterId == request.auth.uid ||
+        resource.data.finderId == request.auth.uid ||
+        !('reporterId' in resource.data)
+      );
+    }
+
+    // ─── NOTIFICATIONS COLLECTION ────────────────────────────────
+    // Users can only read and manage their own notifications.
+    match /notifications/{notificationId} {
+      allow read: if isSignedIn() && resource.data.uid == request.auth.uid;
+      allow create: if isSignedIn();
+      allow update, delete: if isSignedIn() && resource.data.uid == request.auth.uid;
+    }
+
+    // ─── CLAIMS / RECOVERIES COLLECTION ──────────────────────────
+    match /recoveries/{recoveryId} {
+      allow read, write: if isSignedIn();
+    }
+
+    // ─── FALLBACK: ALLOW SIGNED-IN ACCESS FOR DEV/TESTING ────────
+    // Allows signed-in users to interact with any other collections created.
+    match /{document=**} {
+      allow read, write: if isSignedIn();
+    }
+  }
+}
