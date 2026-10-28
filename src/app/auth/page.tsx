@@ -8,8 +8,48 @@ import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { Input } from '@/components/ui/Input';
 import { useFoundBack } from '@/components/FoundBackProvider';
-import { Search, MapPin, ShieldCheck, Mail, Lock, Phone, User, Globe } from 'lucide-react';
+import { Search, MapPin, ShieldCheck, Mail, Lock, Phone, User, Globe, AlertCircle } from 'lucide-react';
 
+// Firebase Auth
+import {
+  createUserWithEmailAndPassword,
+  signInWithEmailAndPassword,
+  updateProfile,
+  GoogleAuthProvider,
+  signInWithPopup,
+} from 'firebase/auth';
+import { doc, setDoc, getDoc, serverTimestamp } from 'firebase/firestore';
+import { auth, db } from '../../../backend/firebase';
+
+// ─── helpers ────────────────────────────────────────────────
+async function ensureUserDoc(
+  uid: string,
+  name: string,
+  email: string,
+  phone: string,
+  role: 'lost' | 'found' | 'both'
+) {
+  const ref = doc(db, 'users', uid);
+  const snap = await getDoc(ref);
+  if (!snap.exists()) {
+    await setDoc(ref, {
+      uid,
+      name,
+      email,
+      phone,
+      trustScore: 80,
+      targetRole: role,
+      itemsLost: 0,
+      itemsFound: 0,
+      itemsRecovered: 0,
+      itemsReturned: 0,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+  }
+}
+
+// ─── Main Auth Component ─────────────────────────────────────
 function AuthContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -18,33 +58,28 @@ function AuthContent() {
   const [activeTab, setActiveTab] = useState<'signin' | 'signup'>('signin');
   const [step, setStep] = useState<'form' | 'onboarding'>('form');
 
-  // Input states
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
 
-  // Form errors
   const [errors, setErrors] = useState<{ [key: string]: string }>({});
+  const [firebaseError, setFirebaseError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
 
-  // Role Preference Selection (for sign up onboarding)
   const [selectedRole, setSelectedRole] = useState<'lost' | 'found' | 'both' | null>(null);
+  // Store the firebase user temporarily between signup form → onboarding step
+  const [pendingUid, setPendingUid] = useState<string | null>(null);
 
-  // Sync tab from URL params
   useEffect(() => {
     const tabParam = searchParams.get('tab');
-    if (tabParam === 'signup') {
-      setActiveTab('signup');
-    } else {
-      setActiveTab('signin');
-    }
+    setActiveTab(tabParam === 'signup' ? 'signup' : 'signin');
   }, [searchParams]);
 
+  // ─── Validation ─────────────────────────────────────────────
   const validateForm = () => {
     const newErrors: { [key: string]: string } = {};
-
     if (activeTab === 'signup') {
       if (!name.trim()) newErrors.name = 'Full name is required';
       if (!phone.trim()) {
@@ -56,67 +91,144 @@ function AuthContent() {
         newErrors.confirmPassword = 'Passwords do not match';
       }
     }
-
     if (!email.trim()) {
       newErrors.email = 'Email address is required';
     } else if (!/\S+@\S+\.\S+/.test(email)) {
       newErrors.email = 'Please enter a valid email address';
     }
-
     if (!password) {
       newErrors.password = 'Password is required';
     } else if (password.length < 6) {
       newErrors.password = 'Password must be at least 6 characters';
     }
-
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  // ─── Human-readable Firebase errors ─────────────────────────
+  const friendlyError = (code: string) => {
+    switch (code) {
+      case 'auth/user-not-found':
+      case 'auth/wrong-password':
+      case 'auth/invalid-credential':
+        return 'Incorrect email or password. Please try again.';
+      case 'auth/email-already-in-use':
+        return 'An account with this email already exists. Try signing in.';
+      case 'auth/too-many-requests':
+        return 'Too many attempts. Please wait a moment and try again.';
+      case 'auth/network-request-failed':
+        return 'Network error. Please check your connection.';
+      case 'auth/popup-closed-by-user':
+        return 'Google sign-in was cancelled.';
+      default:
+        return 'Something went wrong. Please try again.';
+    }
+  };
+
+  // ─── Email / Password submit ─────────────────────────────────
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!validateForm()) return;
 
     setIsLoading(true);
+    setFirebaseError('');
 
-    // Simulate Network Request
-    setTimeout(() => {
-      setIsLoading(false);
+    try {
       if (activeTab === 'signin') {
-        // Log in immediately
-        loginUser(name || 'Arpit Goyal', email, phone || '+91 98765 43210', 'both');
+        // ── Sign in ──────────────────────────────────────────
+        const { user } = await signInWithEmailAndPassword(auth, email.trim(), password);
+
+        // Pull profile from Firestore (may already exist from previous signup)
+        const snap = await getDoc(doc(db, 'users', user.uid));
+        const profile = snap.exists() ? snap.data() : null;
+
+        loginUser(
+          profile?.name ?? user.displayName ?? 'User',
+          user.email ?? email,
+          profile?.phone ?? '',
+          profile?.targetRole ?? 'both'
+        );
+        addToast('Welcome back! 👋', 'success');
         router.push('/location');
       } else {
-        // Go to next onboarding step (What are you looking for?)
-        setStep('onboarding');
+        // ── Sign up — step 1: create Firebase account ────────
+        const { user } = await createUserWithEmailAndPassword(auth, email.trim(), password);
+        await updateProfile(user, { displayName: name.trim() });
+        setPendingUid(user.uid);
+        setStep('onboarding'); // go to role selection
       }
-    }, 1500);
+    } catch (err: any) {
+      setFirebaseError(friendlyError(err.code));
+    } finally {
+      setIsLoading(false);
+    }
   };
 
-  const handleOnboardingSubmit = () => {
+  // ─── Onboarding role submit ──────────────────────────────────
+  const handleOnboardingSubmit = async () => {
     if (!selectedRole) {
       addToast('Please select an option to continue.', 'error');
       return;
     }
+    if (!pendingUid) {
+      addToast('Session expired. Please sign up again.', 'error');
+      setStep('form');
+      return;
+    }
 
     setIsLoading(true);
-    setTimeout(() => {
-      setIsLoading(false);
-      loginUser(name, email, phone, selectedRole);
+    setFirebaseError('');
+    try {
+      // Create Firestore user profile
+      await ensureUserDoc(pendingUid, name.trim(), email.trim(), phone.trim(), selectedRole);
+
+      // Update local app state
+      loginUser(name.trim(), email.trim(), phone.trim(), selectedRole);
+      addToast('Account created! Welcome to FoundBack 🎉', 'success');
       router.push('/location');
-    }, 1200);
+    } catch (err: any) {
+      setFirebaseError('Failed to save your profile. Please try again.');
+    } finally {
+      setIsLoading(false);
+    }
   };
 
-  const triggerGoogleLogin = () => {
+  // ─── Google Sign-In ──────────────────────────────────────────
+  const triggerGoogleLogin = async () => {
     setIsLoading(true);
-    addToast('Connecting to Google...', 'info');
-    setTimeout(() => {
-      setIsLoading(false);
-      loginUser('Google User', 'user@gmail.com', '+91 99999 88888', 'both');
+    setFirebaseError('');
+    try {
+      const provider = new GoogleAuthProvider();
+      const { user } = await signInWithPopup(auth, provider);
+
+      // Ensure Firestore document exists (first time Google users)
+      await ensureUserDoc(
+        user.uid,
+        user.displayName ?? 'User',
+        user.email ?? '',
+        '',
+        'both'
+      );
+
+      const snap = await getDoc(doc(db, 'users', user.uid));
+      const profile = snap.exists() ? snap.data() : null;
+
+      loginUser(
+        profile?.name ?? user.displayName ?? 'User',
+        user.email ?? '',
+        profile?.phone ?? '',
+        profile?.targetRole ?? 'both'
+      );
+      addToast('Signed in with Google! 🎉', 'success');
       router.push('/location');
-    }, 1500);
+    } catch (err: any) {
+      setFirebaseError(friendlyError(err.code));
+    } finally {
+      setIsLoading(false);
+    }
   };
 
+  // ─── UI ──────────────────────────────────────────────────────
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col justify-center py-12 px-4 sm:px-6 lg:px-8 relative overflow-hidden">
       {/* Background blobs */}
@@ -126,17 +238,14 @@ function AuthContent() {
       {/* Brand Header */}
       <div className="sm:mx-auto sm:w-full sm:max-w-md flex flex-col items-center gap-2 mb-6">
         <Logo className="text-brand" size={44} />
-        <h2 className="text-center text-3xl font-extrabold text-slate-900 tracking-tight">
-          FoundBack
-        </h2>
-        <p className="text-center text-sm font-medium text-slate-500">
-          Your lost item deserves a way home.
-        </p>
+        <h2 className="text-center text-3xl font-extrabold text-slate-900 tracking-tight">FoundBack</h2>
+        <p className="text-center text-sm font-medium text-slate-500">Your lost item deserves a way home.</p>
       </div>
 
       <div className="sm:mx-auto sm:w-full sm:max-w-md relative z-10">
         <Card hoverLift={false} className="shadow-xl bg-white/95 backdrop-blur-sm border border-slate-100 p-6 sm:p-8">
           <AnimatePresence mode="wait">
+
             {step === 'form' ? (
               <motion.div
                 key="form-step"
@@ -145,43 +254,38 @@ function AuthContent() {
                 exit={{ opacity: 0, x: 10 }}
                 transition={{ duration: 0.3 }}
               >
-                {/* Tabs selection */}
+                {/* Tab switcher */}
                 <div className="flex border-b border-slate-100 mb-6 bg-slate-50 p-1 rounded-xl">
-                  <button
-                    onClick={() => {
-                      setActiveTab('signin');
-                      setErrors({});
-                    }}
-                    className={`flex-1 text-center py-2 text-xs font-bold rounded-lg transition-all ${
-                      activeTab === 'signin'
-                        ? 'bg-white text-slate-900 shadow-sm'
-                        : 'text-slate-500 hover:text-slate-900'
-                    }`}
-                  >
-                    Sign In
-                  </button>
-                  <button
-                    onClick={() => {
-                      setActiveTab('signup');
-                      setErrors({});
-                    }}
-                    className={`flex-1 text-center py-2 text-xs font-bold rounded-lg transition-all ${
-                      activeTab === 'signup'
-                        ? 'bg-white text-slate-900 shadow-sm'
-                        : 'text-slate-500 hover:text-slate-900'
-                    }`}
-                  >
-                    Create Account
-                  </button>
+                  {(['signin', 'signup'] as const).map((tab) => (
+                    <button
+                      key={tab}
+                      onClick={() => { setActiveTab(tab); setErrors({}); setFirebaseError(''); }}
+                      className={`flex-1 text-center py-2 text-xs font-bold rounded-lg transition-all ${
+                        activeTab === tab
+                          ? 'bg-white text-slate-900 shadow-sm'
+                          : 'text-slate-500 hover:text-slate-900'
+                      }`}
+                    >
+                      {tab === 'signin' ? 'Sign In' : 'Create Account'}
+                    </button>
+                  ))}
                 </div>
+
+                {/* Firebase error banner */}
+                {firebaseError && (
+                  <motion.div
+                    initial={{ opacity: 0, y: -6 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="flex items-start gap-2 bg-red-50 border border-red-200 rounded-xl px-4 py-3 mb-4"
+                  >
+                    <AlertCircle className="w-4 h-4 text-red-500 mt-0.5 flex-shrink-0" />
+                    <p className="text-xs text-red-600 font-medium">{firebaseError}</p>
+                  </motion.div>
+                )}
 
                 <form onSubmit={handleSubmit} className="space-y-4">
                   {activeTab === 'signup' && (
-                    <motion.div
-                      initial={{ opacity: 0, height: 0 }}
-                      animate={{ opacity: 1, height: 'auto' }}
-                      className="space-y-4"
-                    >
+                    <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} className="space-y-4">
                       <Input
                         label="Full Name"
                         placeholder="e.g. Arpit Goyal"
@@ -204,13 +308,12 @@ function AuthContent() {
                   <Input
                     label="Email Address"
                     type="email"
-                    placeholder="arpit@example.com"
+                    placeholder="you@example.com"
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
                     error={errors.email}
                     leftIcon={<Mail className="w-4 h-4" />}
                   />
-
                   <Input
                     label="Password"
                     type="password"
@@ -239,12 +342,7 @@ function AuthContent() {
                     </div>
                   )}
 
-                  <Button
-                    type="submit"
-                    variant="primary"
-                    className="w-full mt-2"
-                    isLoading={isLoading}
-                  >
+                  <Button type="submit" variant="primary" className="w-full mt-2" isLoading={isLoading}>
                     {activeTab === 'signin' ? 'Sign In' : 'Continue'}
                   </Button>
                 </form>
@@ -259,35 +357,20 @@ function AuthContent() {
                   </div>
                 </div>
 
-                {/* Google Sign In */}
-                <Button
-                  onClick={triggerGoogleLogin}
-                  variant="outline"
-                  type="button"
-                  className="w-full flex items-center justify-center gap-2"
-                >
+                {/* Google */}
+                <Button onClick={triggerGoogleLogin} variant="outline" type="button" className="w-full flex items-center justify-center gap-2" isLoading={isLoading}>
                   <svg className="w-4 h-4" viewBox="0 0 24 24">
-                    <path
-                      fill="#4285F4"
-                      d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
-                    />
-                    <path
-                      fill="#34A853"
-                      d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
-                    />
-                    <path
-                      fill="#FBBC05"
-                      d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"
-                    />
-                    <path
-                      fill="#EA4335"
-                      d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"
-                    />
+                    <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
+                    <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
+                    <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z" />
+                    <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" />
                   </svg>
                   Google
                 </Button>
               </motion.div>
+
             ) : (
+              /* ── Onboarding: role selection ────────────────────── */
               <motion.div
                 key="onboarding-step"
                 initial={{ opacity: 0, x: 10 }}
@@ -302,80 +385,45 @@ function AuthContent() {
                   </div>
                   <h3 className="text-xl font-extrabold text-slate-900">What are you looking for?</h3>
                   <p className="text-xs text-slate-500 max-w-[280px]">
-                    Select your primary interest. You can always change this later in your profile.
+                    Select your primary interest. You can always change this later.
                   </p>
                 </div>
 
+                {firebaseError && (
+                  <div className="flex items-start gap-2 bg-red-50 border border-red-200 rounded-xl px-4 py-3">
+                    <AlertCircle className="w-4 h-4 text-red-500 mt-0.5 flex-shrink-0" />
+                    <p className="text-xs text-red-600 font-medium">{firebaseError}</p>
+                  </div>
+                )}
+
                 <div className="flex flex-col gap-3 mt-2 text-left">
-                  <button
-                    type="button"
-                    onClick={() => setSelectedRole('lost')}
-                    className={`p-4 border rounded-xl flex items-start gap-3.5 transition-all text-sm font-semibold select-none ${
-                      selectedRole === 'lost'
-                        ? 'border-brand bg-indigo-50/40 ring-2 ring-indigo-100'
-                        : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50'
-                    }`}
-                  >
-                    <div className="mt-0.5 p-1.5 rounded-lg bg-indigo-50 text-brand flex-shrink-0">
-                      <Search className="w-4 h-4" />
-                    </div>
-                    <div>
-                      <h4 className="font-bold text-slate-900">I lost something</h4>
-                      <p className="text-xs text-slate-500 mt-0.5">I want to report and claim items I lost</p>
-                    </div>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => setSelectedRole('found')}
-                    className={`p-4 border rounded-xl flex items-start gap-3.5 transition-all text-sm font-semibold select-none ${
-                      selectedRole === 'found'
-                        ? 'border-brand bg-indigo-50/40 ring-2 ring-indigo-100'
-                        : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50'
-                    }`}
-                  >
-                    <div className="mt-0.5 p-1.5 rounded-lg bg-indigo-50 text-brand flex-shrink-0">
-                      <MapPin className="w-4 h-4" />
-                    </div>
-                    <div>
-                      <h4 className="font-bold text-slate-900">I found something</h4>
-                      <p className="text-xs text-slate-500 mt-0.5">I want to upload items I found to help return them</p>
-                    </div>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => setSelectedRole('both')}
-                    className={`p-4 border rounded-xl flex items-start gap-3.5 transition-all text-sm font-semibold select-none ${
-                      selectedRole === 'both'
-                        ? 'border-brand bg-indigo-50/40 ring-2 ring-indigo-100'
-                        : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50'
-                    }`}
-                  >
-                    <div className="mt-0.5 p-1.5 rounded-lg bg-indigo-50 text-brand flex-shrink-0">
-                      <ShieldCheck className="w-4 h-4" />
-                    </div>
-                    <div>
-                      <h4 className="font-bold text-slate-900">Both</h4>
-                      <p className="text-xs text-slate-500 mt-0.5">I lose items and find items frequently</p>
-                    </div>
-                  </button>
+                  {([
+                    { role: 'lost' as const, icon: <Search className="w-4 h-4" />, title: 'I lost something', desc: 'I want to report and claim items I lost' },
+                    { role: 'found' as const, icon: <MapPin className="w-4 h-4" />, title: 'I found something', desc: 'I want to upload items I found to help return them' },
+                    { role: 'both' as const, icon: <ShieldCheck className="w-4 h-4" />, title: 'Both', desc: 'I lose items and find items frequently' },
+                  ]).map(({ role, icon, title, desc }) => (
+                    <button
+                      key={role}
+                      type="button"
+                      onClick={() => setSelectedRole(role)}
+                      className={`p-4 border rounded-xl flex items-start gap-3.5 transition-all text-sm font-semibold select-none ${
+                        selectedRole === role
+                          ? 'border-brand bg-indigo-50/40 ring-2 ring-indigo-100'
+                          : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50'
+                      }`}
+                    >
+                      <div className="mt-0.5 p-1.5 rounded-lg bg-indigo-50 text-brand flex-shrink-0">{icon}</div>
+                      <div>
+                        <h4 className="font-bold text-slate-900">{title}</h4>
+                        <p className="text-xs text-slate-500 mt-0.5">{desc}</p>
+                      </div>
+                    </button>
+                  ))}
                 </div>
 
                 <div className="flex gap-3 mt-4">
-                  <Button
-                    variant="outline"
-                    className="flex-1"
-                    onClick={() => setStep('form')}
-                  >
-                    Back
-                  </Button>
-                  <Button
-                    variant="primary"
-                    className="flex-1"
-                    onClick={handleOnboardingSubmit}
-                    isLoading={isLoading}
-                  >
+                  <Button variant="outline" className="flex-1" onClick={() => setStep('form')}>Back</Button>
+                  <Button variant="primary" className="flex-1" onClick={handleOnboardingSubmit} isLoading={isLoading}>
                     Finish Setup
                   </Button>
                 </div>

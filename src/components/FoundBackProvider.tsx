@@ -2,6 +2,9 @@
 
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { Item, ItemStatus, ItemCategory, Notification, ClaimAnswers, INITIAL_ITEMS, INITIAL_NOTIFICATIONS, DeliveryPartner } from '@/data/mockItems';
+import { onAuthStateChanged, signOut } from 'firebase/auth';
+import { doc, getDoc } from 'firebase/firestore';
+import { auth, db } from '../../backend/firebase';
 
 interface User {
   name: string;
@@ -91,37 +94,79 @@ export const FoundBackProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const [activeRecovery, setActiveRecovery] = useState<RecoveryState | null>(null);
   const [isInitialized, setIsInitialized] = useState(false);
 
-  // Initialize from LocalStorage
+  // Initialize localStorage data (items, notifications, location, recovery)
   useEffect(() => {
     if (typeof window !== 'undefined') {
       const storedItems = localStorage.getItem('fb_items');
       const storedNotifications = localStorage.getItem('fb_notifications');
-      const storedUser = localStorage.getItem('fb_user');
       const storedLocation = localStorage.getItem('fb_location');
       const storedRecovery = localStorage.getItem('fb_active_recovery');
 
       setItems(storedItems ? JSON.parse(storedItems) : INITIAL_ITEMS);
       setNotifications(storedNotifications ? JSON.parse(storedNotifications) : INITIAL_NOTIFICATIONS);
-      setUser(
-        storedUser
-          ? JSON.parse(storedUser)
-          : {
-              name: 'Arpit Goyal',
-              email: 'arpit@foundback.com',
-              phone: '+91 98765 43210',
-              isLoggedIn: true,
-              targetRole: 'both',
-              trustScore: 96,
-              itemsLost: 3,
-              itemsFound: 1,
-              itemsRecovered: 1,
-              itemsReturned: 1,
-            }
-      );
-      setUserLocation(storedLocation || 'Ghaziabad, NCR');
+      setUserLocation(storedLocation || null);
       setActiveRecovery(storedRecovery ? JSON.parse(storedRecovery) : null);
       setIsInitialized(true);
     }
+  }, []);
+
+  // Firebase auth state listener — auto-restores session on page refresh
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+      if (firebaseUser) {
+        // Try to load full profile from Firestore
+        try {
+          const snap = await getDoc(doc(db, 'users', firebaseUser.uid));
+          if (snap.exists()) {
+            const p = snap.data();
+            setUser({
+              name: p.name ?? firebaseUser.displayName ?? 'User',
+              email: p.email ?? firebaseUser.email ?? '',
+              phone: p.phone ?? '',
+              isLoggedIn: true,
+              targetRole: p.targetRole ?? 'both',
+              trustScore: p.trustScore ?? 80,
+              itemsLost: p.itemsLost ?? 0,
+              itemsFound: p.itemsFound ?? 0,
+              itemsRecovered: p.itemsRecovered ?? 0,
+              itemsReturned: p.itemsReturned ?? 0,
+            });
+          } else {
+            // Firestore doc not yet created (e.g. Google first-time)
+            setUser({
+              name: firebaseUser.displayName ?? 'User',
+              email: firebaseUser.email ?? '',
+              phone: '',
+              isLoggedIn: true,
+              targetRole: 'both',
+              trustScore: 80,
+              itemsLost: 0,
+              itemsFound: 0,
+              itemsRecovered: 0,
+              itemsReturned: 0,
+            });
+          }
+        } catch {
+          // Offline or permission error — use Firebase Auth data
+          setUser({
+            name: firebaseUser.displayName ?? 'User',
+            email: firebaseUser.email ?? '',
+            phone: '',
+            isLoggedIn: true,
+            targetRole: 'both',
+            trustScore: 80,
+            itemsLost: 0,
+            itemsFound: 0,
+            itemsRecovered: 0,
+            itemsReturned: 0,
+          });
+        }
+      } else {
+        // Logged out
+        setUser(null);
+      }
+    });
+    return () => unsubscribe();
   }, []);
 
   // Save to LocalStorage when states change
@@ -315,27 +360,31 @@ export const FoundBackProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     setNotifications((prev) => [newNotif, ...prev]);
   };
 
-  // Auth Operations
+  // Auth Operations — user state is primarily managed by the Firebase onAuthStateChanged listener above.
+  // loginUser is called by the auth page immediately after Firebase login to update local state without waiting.
   const loginUser = (name: string, email: string, phone: string, role: 'lost' | 'found' | 'both') => {
-    const newUser: User = {
+    setUser((prev) => ({
       name,
       email,
       phone,
       isLoggedIn: true,
       targetRole: role,
-      trustScore: 96,
-      itemsLost: role === 'lost' || role === 'both' ? 1 : 0,
-      itemsFound: role === 'found' || role === 'both' ? 1 : 0,
-      itemsRecovered: 1,
-      itemsReturned: 1,
-    };
-    setUser(newUser);
-    addToast('Welcome to FoundBack', 'success');
+      trustScore: prev?.trustScore ?? 80,
+      itemsLost: prev?.itemsLost ?? 0,
+      itemsFound: prev?.itemsFound ?? 0,
+      itemsRecovered: prev?.itemsRecovered ?? 0,
+      itemsReturned: prev?.itemsReturned ?? 0,
+    }));
   };
 
-  const logoutUser = () => {
-    setUser(null);
+  const logoutUser = async () => {
+    try {
+      await signOut(auth); // Firebase sign out — onAuthStateChanged will set user to null
+    } catch {
+      // ignore
+    }
     setActiveRecovery(null);
+    localStorage.removeItem('fb_user');
     addToast('Logged out successfully.', 'info');
   };
 
