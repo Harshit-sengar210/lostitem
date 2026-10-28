@@ -119,28 +119,32 @@ function AuthContent() {
   };
 
   // ─── Human-readable Firebase errors ─────────────────────────
-  const friendlyError = (code: string) => {
+  const friendlyError = (err: any) => {
+    const code = err?.code || '';
+    const message = err?.message || '';
+
     switch (code) {
       case 'auth/user-not-found':
+        return 'No account found with this email. Please click "Create Account" above to register first.';
       case 'auth/wrong-password':
       case 'auth/invalid-credential':
-        return 'Incorrect email or password. Please try again.';
+        return 'Incorrect email or password, or this account does not exist yet. If you have not created an account, click "Create Account".';
       case 'auth/email-already-in-use':
-        return 'An account with this email already exists. Try signing in.';
+        return 'An account with this email already exists. Please switch to "Sign In".';
       case 'auth/too-many-requests':
-        return 'Too many attempts. Please wait a moment and try again.';
+        return 'Too many attempts. Please wait a moment or reset your password.';
       case 'auth/network-request-failed':
-        return 'Network error. Please check your internet connection.';
+        return 'Network connection error. Please check your internet connection.';
       case 'auth/popup-closed-by-user':
-        return 'Google sign-in was closed before completion.';
+        return 'Google sign-in popup was closed before completion.';
       case 'auth/operation-not-allowed':
-        return 'Sign-in method is not enabled in Firebase Console. Please enable Email/Password or Google provider.';
+        return 'Sign-in method is not enabled in Firebase Console. Go to Authentication > Sign-in method in Firebase and enable Email/Password.';
       case 'auth/invalid-email':
-        return 'Invalid email format. Please check and try again.';
+        return 'Please enter a valid email format (e.g. you@example.com).';
       case 'auth/weak-password':
         return 'Password is too weak. Please use at least 6 characters.';
       default:
-        return 'Authentication failed. Please check your details or try again.';
+        return message || 'Authentication failed. Please verify your details or create an account first.';
     }
   };
 
@@ -158,7 +162,7 @@ function AuthContent() {
       setResetSuccessMessage('Password reset link has been sent to your email.');
       addToast('Password reset link sent to your email.', 'info');
     } catch (err: any) {
-      setFirebaseError(friendlyError(err.code));
+      setFirebaseError(friendlyError(err));
     } finally {
       setIsLoading(false);
     }
@@ -209,7 +213,7 @@ function AuthContent() {
         setStep('onboarding'); // go to role selection
       }
     } catch (err: any) {
-      setFirebaseError(friendlyError(err.code));
+      setFirebaseError(friendlyError(err));
     } finally {
       setIsLoading(false);
     }
@@ -284,7 +288,7 @@ function AuthContent() {
       addToast('Signed in with Google! 🎉', 'success');
       router.push('/home');
     } catch (err: any) {
-      setFirebaseError(friendlyError(err.code));
+      setFirebaseError(friendlyError(err));
     } finally {
       setIsLoading(false);
     }
@@ -341,7 +345,7 @@ function AuthContent() {
                     className="flex items-start gap-2 bg-red-50 border border-red-200 rounded-xl px-4 py-3 mb-4"
                   >
                     <AlertCircle className="w-4 h-4 text-red-500 mt-0.5 flex-shrink-0" />
-                    <p className="text-xs text-red-600 font-medium">{firebaseError}</p>
+                    <p className="text-xs text-red-600 font-medium leading-relaxed">{firebaseError}</p>
                   </motion.div>
                 )}
 
