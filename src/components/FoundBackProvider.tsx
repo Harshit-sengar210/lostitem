@@ -430,6 +430,16 @@ export const FoundBackProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     addToast('Listing updated successfully.', 'success');
   };
 
+  const markNotificationRead = (id: string) => {
+    setNotifications((prev) =>
+      prev.map((notif) => (notif.id === id ? { ...notif, unread: false } : notif))
+    );
+  };
+
+  const clearNotifications = () => {
+    setNotifications([]);
+  };
+
   const saveItem = (itemId: string) => {
     addToast('Item saved', 'success');
   };
