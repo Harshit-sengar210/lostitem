@@ -320,8 +320,15 @@ export default function LandingPage() {
       </main>
 
       {/* Footer */}
-      <footer className="w-full py-6 border-t border-slate-200/50 bg-white/50 text-center text-xs text-slate-500 z-10">
+      <footer className="w-full py-6 border-t border-slate-200/50 bg-white/50 text-center text-xs text-slate-500 z-10 flex flex-col sm:flex-row items-center justify-between max-w-7xl mx-auto px-6 gap-3">
         <p>&copy; {new Date().getFullYear()} FoundBack Recovery Network. All rights reserved.</p>
+        <Link
+          href="/admin"
+          className="text-slate-400 hover:text-indigo-600 transition-colors font-semibold flex items-center gap-1.5"
+        >
+          <span className="w-1.5 h-1.5 rounded-full bg-slate-300"></span>
+          Admin Login
+        </Link>
       </footer>
     </div>
   );
