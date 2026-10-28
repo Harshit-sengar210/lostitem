@@ -4,7 +4,7 @@ import React, { createContext, useContext, useState, useEffect } from 'react';
 import { Item, ItemStatus, ItemCategory, Notification, ClaimAnswers, INITIAL_ITEMS, INITIAL_NOTIFICATIONS, DeliveryPartner } from '@/data/mockItems';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
 import { doc, getDoc, setDoc, updateDoc, deleteDoc, collection, getDocs, query, orderBy, serverTimestamp, increment } from 'firebase/firestore';
-import { auth, db } from '../../backend/firebase';
+import { auth, db } from '@/backend/firebase';
 
 interface User {
   name: string;

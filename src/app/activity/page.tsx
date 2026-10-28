@@ -21,7 +21,7 @@ import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Item } from '@/data/mockItems';
-import { auth } from '../../../backend/firebase';
+import { auth } from '@/backend/firebase';
 
 const AnimatedNumber: React.FC<{ value: number }> = ({ value }) => {
   const [count, setCount] = useState(0);

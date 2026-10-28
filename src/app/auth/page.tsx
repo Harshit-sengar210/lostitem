@@ -20,7 +20,7 @@ import {
   sendPasswordResetEmail,
 } from 'firebase/auth';
 import { doc, setDoc, getDoc, serverTimestamp } from 'firebase/firestore';
-import { auth, db } from '../../../backend/firebase';
+import { auth, db } from '@/backend/firebase';
 
 // ─── helpers ────────────────────────────────────────────────
 async function ensureUserDoc(

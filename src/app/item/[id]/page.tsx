@@ -22,7 +22,7 @@ import { Navigation } from '@/components/Navigation';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { doc, getDoc } from 'firebase/firestore';
-import { db } from '../../../backend/firebase';
+import { db } from '@/backend/firebase';
 import { Item } from '@/data/mockItems';
 
 export default function ItemDetailsPage() {

@@ -10,7 +10,7 @@ import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { updateProfile } from 'firebase/auth';
 import { doc, setDoc } from 'firebase/firestore';
-import { auth, db } from '../../../../backend/firebase';
+import { auth, db } from '@/backend/firebase';
 
 export default function PersonalInfoPage() {
   const router = useRouter();
